@@ -18,8 +18,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Serve static files from frontend directory (if frontend folder exists)
-if (path.resolve(__dirname, '../frontend')) {
-  app.use(express.static(path.join(__dirname, '../frontend')));
+const fs = require('fs');
+const frontendPath = path.join(__dirname, '../frontend');
+if (fs.existsSync(frontendPath)) {
+  app.use(express.static(frontendPath));
 }
 
 // API Routes
@@ -36,8 +38,23 @@ app.use('/api', routes);
 
 // Serve index.html for root route (if frontend exists)
 app.get('/', (req, res) => {
-  const frontendPath = path.join(__dirname, '../frontend/index.html');
-  res.sendFile(frontendPath);
+  const frontendIndexPath = path.join(__dirname, '../frontend/index.html');
+  if (fs.existsSync(frontendIndexPath)) {
+    res.sendFile(frontendIndexPath);
+  } else {
+    res.json({
+      success: true,
+      message: 'PharmaCare Backend API',
+      version: '1.0.0',
+      endpoints: {
+        health: 'GET /api/health',
+        auth: 'GET /api/auth - View auth endpoints',
+        register: 'POST /api/auth/register',
+        login: 'POST /api/auth/login'
+      },
+      docs: 'See /api/auth for authentication endpoints'
+    });
+  }
 });
 
 // Error handling middleware (must be last)

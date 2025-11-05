@@ -1,12 +1,24 @@
 // Optional: data models (plain JS objects or JSON)
 // User model - data structure and model methods
 
-// Create a new user object
+// Create a new user object (for non-auth users)
 const createUser = (name, email, id) => {
   return {
     id: id,
     name: name,
     email: email,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+};
+
+// Create user object with password (for authenticated users)
+const createUserWithPassword = (name, email, password, id) => {
+  return {
+    id: id,
+    name: name,
+    email: email,
+    password: password, // This should be hashed before creating
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -49,6 +61,7 @@ const formatUser = (user) => {
 
 module.exports = {
   createUser,
+  createUserWithPassword,
   validateUser,
   isValidEmail,
   formatUser

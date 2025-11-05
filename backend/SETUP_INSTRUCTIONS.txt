@@ -1,0 +1,73 @@
+================================================================================
+                    PharmaCare Backend Setup Instructions
+================================================================================
+
+YOUR SERVER IS WORKING! But you need to import the database.
+
+================================================================================
+STEP 1: Import Database (IMPORTANT!)
+================================================================================
+
+1. Open XAMPP Control Panel
+2. Click "Start" next to MySQL
+3. Open phpMyAdmin: http://localhost/phpmyadmin
+4. Click "Import" tab (top menu)
+5. Click "Choose File"
+6. Select: database/schema.sql (from project root)
+7. Click "Go" at bottom
+8. Wait for success message
+
+You should see tables: pharmacy, branch, role, user, category, medicine, etc.
+
+================================================================================
+STEP 2: Create .env File
+================================================================================
+
+1. Go to backend folder
+2. Create new file named: .env
+3. Copy and paste this content:
+
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=pharmacare
+PORT=5000
+JWT_SECRET=my-secret-key-change-this-in-production
+JWT_EXPIRE=7d
+
+================================================================================
+STEP 3: Start Server
+================================================================================
+
+Open terminal in backend folder, run:
+npm install
+npm start
+
+You should see:
+✅ Database connected successfully
+🚀 Server running on http://localhost:5000
+
+================================================================================
+STEP 4: Test Authentication
+================================================================================
+
+Open browser:
+http://localhost:5000/api/health
+http://localhost:5000/api/auth
+
+================================================================================
+Current Status:
+================================================================================
+
+✅ Express.js Framework: INSTALLED AND WORKING
+✅ Authentication System: READY
+✅ Server: RUNNING
+❌ Database: NOT IMPORTED YET
+
+Once you import database/schema.sql, everything will work!
+
+================================================================================
+
+
+
+
