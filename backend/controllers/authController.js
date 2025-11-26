@@ -4,7 +4,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
-const { sendVerificationEmail } = require('../utils/emailService');
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emailService');
 
 // Register new user
 const register = async (req, res, next) => {
@@ -24,8 +24,8 @@ const register = async (req, res, next) => {
       });
     }
 
-    // Validate role_id and branch_id exist
-    const [roles] = await pool.execute('SELECT role_id FROM role WHERE role_id = ?', [role_id]);
+    // Validate role_id exists
+    const [roles] = await pool.execute('SELECT role_id, role_name FROM role WHERE role_id = ?', [role_id]);
     if (roles.length === 0) {
       return res.status(400).json({
         success: false,
@@ -33,12 +33,34 @@ const register = async (req, res, next) => {
       });
     }
 
-    const [branches] = await pool.execute('SELECT branch_id FROM branch WHERE branch_id = ?', [branch_id]);
-    if (branches.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid branch_id'
-      });
+    const role = roles[0];
+    const isAdmin = role.role_name === 'Admin';
+
+    // Validate branch_id
+    // Admin is a system role and does not require branch_id
+    // Pharmacy roles (Manager, Pharmacist, Cashier) require branch_id
+    if (!isAdmin) {
+      if (!branch_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'branch_id is required for pharmacy roles (Manager, Pharmacist, Cashier)'
+        });
+      }
+      const [branches] = await pool.execute('SELECT branch_id FROM branch WHERE branch_id = ?', [branch_id]);
+      if (branches.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid branch_id'
+        });
+      }
+    } else {
+      // For Admin, branch_id should be null
+      if (branch_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Admin is a system role and does not belong to any branch. Do not provide branch_id for Admin users.'
+        });
+      }
     }
 
     // Hash password
@@ -52,12 +74,13 @@ const register = async (req, res, next) => {
     const expirationTime = new Date(Date.now() + 10 * 60 * 1000);
 
     // Insert new user with verification code
+    // Admin users have branch_id = NULL, pharmacy roles have branch_id
     // Try with verification fields first, fallback to basic insert if columns don't exist
     let result;
     try {
       [result] = await pool.execute(
         'INSERT INTO user (full_name, email, password, role_id, branch_id, verification_code, verification_code_expires, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [full_name, email, hashedPassword, role_id, branch_id, verificationCode, expirationTime, false]
+        [full_name, email, hashedPassword, role_id, isAdmin ? null : branch_id, verificationCode, expirationTime, false]
       );
     } catch (insertError) {
       // If verification columns don't exist, insert without them
@@ -65,7 +88,7 @@ const register = async (req, res, next) => {
         console.warn('Verification columns not found, registering without email verification');
         [result] = await pool.execute(
           'INSERT INTO user (full_name, email, password, role_id, branch_id) VALUES (?, ?, ?, ?, ?)',
-          [full_name, email, hashedPassword, role_id, branch_id]
+          [full_name, email, hashedPassword, role_id, isAdmin ? null : branch_id]
         );
       } else {
         throw insertError;
@@ -431,22 +454,177 @@ const resendVerificationCode = async (req, res, next) => {
       [verificationCode, expirationTime, user.user_id]
     );
 
-    // Send verification email
-    try {
-      await sendVerificationEmail(email, verificationCode, user.full_name);
+    // Send verification email (only if SMTP is configured)
+    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+      try {
+        await sendVerificationEmail(email, verificationCode, user.full_name);
+        console.log(`✅ Verification code resent to ${email}`);
+        res.json({
+          success: true,
+          message: 'Verification code sent to your email'
+        });
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        // Still return success but with a warning if email fails
+        // The code is still saved in the database
+        res.json({
+          success: true,
+          message: 'Verification code generated, but email could not be sent. Please check SMTP configuration.',
+          verification_code: verificationCode, // Only for development/testing
+          warning: 'Email service is not properly configured'
+        });
+      }
+    } else {
+      // SMTP not configured - return the code directly (for development/testing)
+      console.warn('⚠️  SMTP not configured - returning verification code in response');
       res.json({
         success: true,
-        message: 'Verification code sent to your email'
-      });
-    } catch (emailError) {
-      console.error('Failed to send verification email:', emailError);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to send verification email. Please try again later.'
+        message: 'Verification code generated. Email service is not configured.',
+        verification_code: verificationCode, // Only for development/testing
+        warning: 'Email service is not configured. Set SMTP_USER and SMTP_PASS in .env to enable email sending.'
       });
     }
   } catch (error) {
     console.error('Resend verification error:', error);
+    next(error);
+  }
+};
+
+// Forgot password - send temporary password via email
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    // Find user by email
+    const [users] = await pool.execute(
+      'SELECT user_id, email, full_name, is_active FROM user WHERE email = ?',
+      [email]
+    );
+
+    if (users.length === 0) {
+      // Don't reveal if email exists for security reasons
+      return res.json({
+        success: true,
+        message: 'If the email exists, a temporary password has been sent to your email address.'
+      });
+    }
+
+    const user = users[0];
+
+    // Check if user is active
+    if (user.is_active === false || user.is_active === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Account is deactivated. Please contact administrator.'
+      });
+    }
+
+    // Generate a secure temporary password (12 characters: uppercase, lowercase, numbers)
+    const generateTemporaryPassword = () => {
+      const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+      const numbers = '0123456789';
+      const allChars = uppercase + lowercase + numbers;
+      
+      let password = '';
+      // Ensure at least one of each type
+      password += uppercase[Math.floor(Math.random() * uppercase.length)];
+      password += lowercase[Math.floor(Math.random() * lowercase.length)];
+      password += numbers[Math.floor(Math.random() * numbers.length)];
+      
+      // Fill the rest randomly
+      for (let i = password.length; i < 12; i++) {
+        password += allChars[Math.floor(Math.random() * allChars.length)];
+      }
+      
+      // Shuffle the password
+      return password.split('').sort(() => Math.random() - 0.5).join('');
+    };
+
+    // Check if SMTP is configured before proceeding
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      return res.status(503).json({
+        success: false,
+        message: 'Email service is not configured. Please contact administrator.',
+        error: 'SMTP credentials not configured. Set SMTP_USER and SMTP_PASS in .env file.'
+      });
+    }
+
+    const temporaryPassword = generateTemporaryPassword();
+
+    // Hash the temporary password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(temporaryPassword, saltRounds);
+
+    // Send password reset email first (before changing password)
+    // This ensures we don't change the password if email fails
+    try {
+      await sendPasswordResetEmail(email, temporaryPassword, user.full_name);
+      console.log(`✅ Password reset email sent to ${email}`);
+      
+      // Only update password after email is successfully sent
+      await pool.execute(
+        'UPDATE user SET password = ? WHERE user_id = ?',
+        [hashedPassword, user.user_id]
+      );
+      
+      res.json({
+        success: true,
+        message: 'A temporary password has been sent to your email address. Please check your inbox and log in with the temporary password.'
+      });
+    } catch (emailError) {
+      console.error('❌ Failed to send password reset email:', emailError);
+      console.error('Error details:', {
+        message: emailError.message,
+        code: emailError.code,
+        command: emailError.command,
+        response: emailError.response,
+        responseCode: emailError.responseCode
+      });
+      
+      // Provide more detailed error information for debugging
+      let errorMessage = 'Failed to send password reset email. Please try again later or contact support.';
+      let errorDetails = null;
+      
+      // Check for common SMTP errors
+      if (emailError.message.includes('Invalid login')) {
+        errorMessage = 'SMTP authentication failed. Please check your email credentials.';
+        errorDetails = 'The email username or password (app password) is incorrect.';
+      } else if (emailError.message.includes('Connection timeout') || emailError.message.includes('ECONNREFUSED')) {
+        errorMessage = 'Could not connect to email server. Please check your SMTP settings.';
+        errorDetails = 'Unable to reach the SMTP server. Check SMTP_HOST and SMTP_PORT in .env file.';
+      } else if (emailError.message.includes('SMTP credentials not configured')) {
+        errorMessage = 'Email service is not configured.';
+        errorDetails = 'SMTP_USER and SMTP_PASS must be set in .env file.';
+      } else if (emailError.code === 'EAUTH') {
+        errorMessage = 'Email authentication failed.';
+        errorDetails = 'Please verify your SMTP_USER and SMTP_PASS (use app password for Gmail).';
+      } else if (emailError.code === 'ETIMEDOUT' || emailError.code === 'ECONNREFUSED') {
+        errorMessage = 'Email server connection failed.';
+        errorDetails = 'Check your internet connection and SMTP server settings.';
+      }
+      
+      // Don't change password if email fails
+      res.status(500).json({
+        success: false,
+        message: errorMessage,
+        error: errorDetails || emailError.message,
+        debug: process.env.NODE_ENV === 'development' ? {
+          code: emailError.code,
+          command: emailError.command,
+          responseCode: emailError.responseCode
+        } : undefined
+      });
+    }
+  } catch (error) {
+    console.error('Forgot password error:', error);
     next(error);
   }
 };
@@ -471,5 +649,6 @@ module.exports = {
   getMe,
   logout,
   verifyEmail,
-  resendVerificationCode
+  resendVerificationCode,
+  forgotPassword
 };
