@@ -47,8 +47,11 @@ pharmacare/
 **Authentication Tables:**
 1. **pharmacy** - Company/chain information
 2. **branch** - Individual pharmacy outlets
-3. **role** - User roles (Admin, Manager, Pharmacist, Cashier)
+3. **role** - User roles
+   - **System role:** Admin (system-level, does not belong to any branch)
+   - **Pharmacy roles:** Manager, Pharmacist, Cashier (belong to a branch)
 4. **user** - Employee accounts with authentication
+   - Note: `branch_id` is NULL for Admin users, required for pharmacy roles
 
 **Feature Tables:**
 5. **category** - Medicine categories
@@ -117,6 +120,8 @@ Content-Type: application/json
   "role_id": 4,
   "branch_id": 1
 }
+
+Note: For Admin users (role_id=1), omit branch_id as Admin is a system role.
 ```
 
 ### Login
@@ -143,10 +148,18 @@ GET /api/auth
 
 ## 👥 User Roles
 
-- **1** - Admin (Full system access)
-- **2** - Manager (Branch-level management)
-- **3** - Pharmacist (Stock management)
-- **4** - Cashier (Sales only)
+### System Role
+- **1** - Admin (System-level access across all branches)
+  - ⚠️ **Admin is NOT a pharmacy role**
+  - Does not belong to any branch (`branch_id` is NULL)
+  - System-level access only
+
+### Pharmacy Roles (Branch-specific)
+- **2** - Manager (Branch-level management and oversight)
+- **3** - Pharmacist (Medicine stock management and dispensing)
+- **4** - Cashier (Sales transactions only)
+
+**Note:** Only Manager, Pharmacist, and Cashier are actual pharmacy roles that belong to a branch. Admin belongs to the system, not to any branch.
 
 ## 🏢 Sample Branches
 

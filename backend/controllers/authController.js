@@ -7,9 +7,10 @@ const pool = require('../config/database');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emailService');
 
 // Register new user
+// NOTE: Only Managers can register. Admin is hard-coded. Pharmacist/Cashier are created by Manager.
 const register = async (req, res, next) => {
   try {
-    const { full_name, email, password, role_id, branch_id } = req.body;
+    const { full_name, email, password, role_id, branch_id, branch_name, location } = req.body;
 
     // Check if user already exists
     const [existingUsers] = await pool.execute(
@@ -34,18 +35,61 @@ const register = async (req, res, next) => {
     }
 
     const role = roles[0];
-    const isAdmin = role.role_name === 'Admin';
+    const isManager = role.role_name === 'Manager';
 
-    // Validate branch_id
-    // Admin is a system role and does not require branch_id
-    // Pharmacy roles (Manager, Pharmacist, Cashier) require branch_id
-    if (!isAdmin) {
-      if (!branch_id) {
+    // ONLY Managers can register through this endpoint
+    // Admin is hard-coded in database
+    // Pharmacist/Cashier are created by Manager via /api/manager/staff
+    if (!isManager) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only Managers can register. Admin accounts are pre-configured. Pharmacist and Cashier accounts are created by Managers.'
+      });
+    }
+
+    let finalBranchId = null;
+
+    // Manager can create new branch OR join existing branch
+    if (branch_name) {
+      // Manager is creating a new branch
+      if (!location) {
         return res.status(400).json({
           success: false,
-          message: 'branch_id is required for pharmacy roles (Manager, Pharmacist, Cashier)'
+          message: 'location is required when creating a new branch'
         });
       }
+
+      // Get default pharmacy_id (first pharmacy)
+      const [pharmacies] = await pool.execute('SELECT pharmacy_id FROM pharmacy LIMIT 1');
+      if (pharmacies.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No pharmacy found. Please create a pharmacy first.'
+        });
+      }
+      const pharmacy_id = pharmacies[0].pharmacy_id;
+
+      // Check if branch name already exists
+      const [existingBranches] = await pool.execute(
+        'SELECT branch_id FROM branch WHERE branch_name = ?',
+        [branch_name]
+      );
+
+      if (existingBranches.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'Branch with this name already exists. Please use an existing branch or choose a different name.'
+        });
+      }
+
+      // Create new branch (created_by will be set after user is created)
+      const [branchResult] = await pool.execute(
+        'INSERT INTO branch (pharmacy_id, branch_name, location) VALUES (?, ?, ?)',
+        [pharmacy_id, branch_name, location]
+      );
+      finalBranchId = branchResult.insertId;
+    } else if (branch_id) {
+      // Manager is joining an existing branch
       const [branches] = await pool.execute('SELECT branch_id FROM branch WHERE branch_id = ?', [branch_id]);
       if (branches.length === 0) {
         return res.status(400).json({
@@ -53,14 +97,12 @@ const register = async (req, res, next) => {
           message: 'Invalid branch_id'
         });
       }
+      finalBranchId = branch_id;
     } else {
-      // For Admin, branch_id should be null
-      if (branch_id) {
-        return res.status(400).json({
-          success: false,
-          message: 'Admin is a system role and does not belong to any branch. Do not provide branch_id for Admin users.'
-        });
-      }
+      return res.status(400).json({
+        success: false,
+        message: 'Manager must either provide branch_name (to create new branch) or branch_id (to join existing branch)'
+      });
     }
 
     // Hash password
@@ -73,25 +115,43 @@ const register = async (req, res, next) => {
     // Set expiration time (10 minutes from now)
     const expirationTime = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Insert new user with verification code
-    // Admin users have branch_id = NULL, pharmacy roles have branch_id
-    // Try with verification fields first, fallback to basic insert if columns don't exist
+    // Managers are created as INACTIVE (pending admin activation)
+    const isActive = false;
+
+    // Insert new manager user
+    // Manager is inactive until admin activates
     let result;
     try {
       [result] = await pool.execute(
-        'INSERT INTO user (full_name, email, password, role_id, branch_id, verification_code, verification_code_expires, is_email_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [full_name, email, hashedPassword, role_id, isAdmin ? null : branch_id, verificationCode, expirationTime, false]
+        `INSERT INTO user (
+          full_name, email, password, role_id, branch_id, 
+          is_active, verification_code, verification_code_expires, is_email_verified
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [full_name, email, hashedPassword, role_id, finalBranchId, isActive, verificationCode, expirationTime, false]
       );
     } catch (insertError) {
       // If verification columns don't exist, insert without them
       if (insertError.code && insertError.code.startsWith('ER_BAD_FIELD')) {
         console.warn('Verification columns not found, registering without email verification');
         [result] = await pool.execute(
-          'INSERT INTO user (full_name, email, password, role_id, branch_id) VALUES (?, ?, ?, ?, ?)',
-          [full_name, email, hashedPassword, role_id, isAdmin ? null : branch_id]
+          'INSERT INTO user (full_name, email, password, role_id, branch_id, is_active) VALUES (?, ?, ?, ?, ?, ?)',
+          [full_name, email, hashedPassword, role_id, finalBranchId, isActive]
         );
       } else {
         throw insertError;
+      }
+    }
+
+    // Update branch.created_by if this manager created the branch
+    if (branch_name && finalBranchId) {
+      try {
+        await pool.execute(
+          'UPDATE branch SET created_by = ? WHERE branch_id = ?',
+          [result.insertId, finalBranchId]
+        );
+      } catch (updateError) {
+        // Log but don't fail registration if created_by column doesn't exist
+        console.warn('Could not update branch.created_by:', updateError.message);
       }
     }
 
@@ -156,11 +216,16 @@ const register = async (req, res, next) => {
     // Remove password and verification code from response
     const { password: _, verification_code: __, verification_code_expires: ___, ...userWithoutPassword } = newUser;
 
+    // Custom message for managers
+    let finalMessage = 'Manager account created successfully. Your account is pending admin activation. You will be notified once your account is activated.';
+
     res.status(201).json({
       success: true,
-      message: registrationMessage,
+      message: finalMessage,
       user: userWithoutPassword,
-      requiresVerification: hasVerificationColumns && emailSent
+      requiresVerification: hasVerificationColumns && emailSent,
+      requiresActivation: true,
+      isActive: false
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -190,7 +255,8 @@ const login = async (req, res, next) => {
     // Find user by email with role and branch info
     const [users] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.password, u.role_id, u.branch_id, 
-              u.is_active, u.is_email_verified, u.created_at, r.role_name, b.branch_name 
+              u.is_active, u.is_email_verified, u.must_change_password, 
+              u.is_temporary_password, u.created_at, r.role_name, b.branch_name 
        FROM user u 
        LEFT JOIN role r ON u.role_id = r.role_id 
        LEFT JOIN branch b ON u.branch_id = b.branch_id 
@@ -207,12 +273,44 @@ const login = async (req, res, next) => {
 
     const user = users[0];
 
-    // Check if user is active
-    if (user.is_active === false || user.is_active === 0) {
-      return res.status(401).json({
-        success: false,
-        message: 'Account is deactivated. Please contact administrator.'
-      });
+    // Debug logging
+    console.log(`Login attempt: email=${email}, is_active=${user.is_active}, role_name=${user.role_name}, is_email_verified=${user.is_email_verified}`);
+
+    // Check if user is active - different messages for different roles
+    // MySQL returns BOOLEAN as 0/1, so check both
+    const isActive = user.is_active === true || user.is_active === 1 || user.is_active === '1';
+    
+    if (!isActive) {
+      // Staff accounts (Pharmacist/Cashier) are activated automatically after email verification
+      // Only Managers need admin activation
+      const roleName = user.role_name || '';
+      
+      if (roleName === 'Manager') {
+        return res.status(401).json({
+          success: false,
+          message: 'Account is pending admin activation. Please contact administrator.'
+        });
+      } else if (roleName === 'Pharmacist' || roleName === 'Cashier') {
+        // Check if email is verified
+        const isEmailVerified = user.is_email_verified === true || user.is_email_verified === 1 || user.is_email_verified === '1';
+        
+        if (!isEmailVerified) {
+          return res.status(401).json({
+            success: false,
+            message: 'Account not activated yet. Please verify your email first. Contact your manager if you need help.'
+          });
+        } else {
+          return res.status(401).json({
+            success: false,
+            message: 'Account is not active. Please contact your manager to activate your account.'
+          });
+        }
+      } else {
+        return res.status(401).json({
+          success: false,
+          message: 'Account is deactivated. Please contact administrator.'
+        });
+      }
     }
 
     // Verify password
@@ -226,18 +324,43 @@ const login = async (req, res, next) => {
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
+      // Provide more helpful error message based on account status
+      let errorMessage = 'Invalid email or password';
+      
+      // If account is not email verified, suggest verification
+      if (user.is_email_verified === false || user.is_email_verified === 0) {
+        if (user.role_name === 'Pharmacist' || user.role_name === 'Cashier') {
+          errorMessage = 'Account not verified yet. Please contact your manager to verify your email with the verification code.';
+        } else {
+          errorMessage = 'Invalid email or password. If you just registered, please verify your email first.';
+        }
+      } else if (user.is_temporary_password === true || user.is_temporary_password === 1) {
+        // If using temporary password, provide more specific message
+        errorMessage = 'Invalid temporary password. Please check the email sent to you for the correct temporary password, or contact your manager.';
+      }
+      
       return res.status(401).json({
         success: false,
-        message: 'Invalid email or password'
+        message: errorMessage
       });
     }
 
-    // Check if email is verified (only if is_email_verified column exists)
-    if (user.is_email_verified !== undefined && user.is_email_verified !== null && !user.is_email_verified) {
-      return res.status(403).json({
-        success: false,
-        message: 'Please verify your email before logging in. Check your email for the verification code.'
-      });
+    // Check if email is verified - different handling for different roles
+    // Admin and Manager: email verification is optional/separate from activation
+    // Pharmacist/Cashier: email verification is required (handled by manager)
+    if (user.is_email_verified !== undefined && user.is_email_verified !== null) {
+      const isEmailVerified = user.is_email_verified === true || user.is_email_verified === 1 || user.is_email_verified === '1';
+      const roleName = user.role_name || '';
+      
+      // For Pharmacist and Cashier, email must be verified (manager verifies it)
+      if (!isEmailVerified && (roleName === 'Pharmacist' || roleName === 'Cashier')) {
+        return res.status(403).json({
+          success: false,
+          message: 'Please verify your email before logging in. Contact your manager to verify your email with the verification code.'
+        });
+      }
+      // For Admin and Manager, email verification is less strict (can login if active)
+      // This check is already handled above in the isActive check
     }
 
     // Generate JWT token
@@ -250,7 +373,7 @@ const login = async (req, res, next) => {
     // Update last login (wrap in try-catch to prevent errors if column doesn't exist)
     try {
       await pool.execute(
-        'UPDATE user SET last_login = NOW() WHERE user_id = ?',
+        'UPDATE user SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?',
         [user.user_id]
       );
     } catch (updateError) {
@@ -262,14 +385,21 @@ const login = async (req, res, next) => {
       }
     }
 
+    // Check if user must change password
+    const mustChangePassword = user.must_change_password === true || user.must_change_password === 1 || 
+                               user.is_temporary_password === true || user.is_temporary_password === 1;
+
     // Remove password from response
     const { password: _, ...userWithoutPassword } = user;
 
     return res.json({
       success: true,
-      message: 'Login successful',
+      message: mustChangePassword 
+        ? 'Login successful. Please change your password.'
+        : 'Login successful',
       token,
-      user: userWithoutPassword
+      user: userWithoutPassword,
+      mustChangePassword: mustChangePassword
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -629,6 +759,102 @@ const forgotPassword = async (req, res, next) => {
   }
 };
 
+// Change password - for users to change their own password
+const changePassword = async (req, res, next) => {
+  try {
+    const userId = req.user.user_id; // From auth middleware
+    const { current_password, new_password } = req.body;
+
+    // Validate input
+    if (!current_password || !new_password) {
+      return res.status(400).json({
+        success: false,
+        message: 'current_password and new_password are required'
+      });
+    }
+
+    // Validate new password length
+    if (new_password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters long'
+      });
+    }
+
+    // Get current user with password
+    const [users] = await pool.execute(
+      'SELECT user_id, password, is_temporary_password, must_change_password FROM user WHERE user_id = ?',
+      [userId]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const user = users[0];
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(current_password, user.password);
+
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Check if new password is same as current password
+    const isSamePassword = await bcrypt.compare(new_password, user.password);
+    if (isSamePassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be different from current password'
+      });
+    }
+
+    // Hash new password
+    const saltRounds = 10;
+    const hashedNewPassword = await bcrypt.hash(new_password, saltRounds);
+
+    // Update password and clear temporary password flags
+    await pool.execute(
+      `UPDATE user 
+       SET password = ?,
+           is_temporary_password = 0,
+           must_change_password = 0,
+           password_changed_at = CURRENT_TIMESTAMP
+       WHERE user_id = ?`,
+      [hashedNewPassword, userId]
+    );
+
+    // Get updated user info
+    const [updatedUsers] = await pool.execute(
+      `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
+              u.is_temporary_password, u.must_change_password, r.role_name
+       FROM user u
+       LEFT JOIN role r ON u.role_id = r.role_id
+       WHERE u.user_id = ?`,
+      [userId]
+    );
+
+    console.log(`✅ Password changed successfully for user_id=${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully',
+      data: {
+        user: updatedUsers[0]
+      }
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    next(error);
+  }
+};
+
 // Logout user
 const logout = async (req, res, next) => {
   try {
@@ -650,5 +876,6 @@ module.exports = {
   logout,
   verifyEmail,
   resendVerificationCode,
-  forgotPassword
+  forgotPassword,
+  changePassword
 };

@@ -4,11 +4,88 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
+const adminDashboardController = require('../controllers/adminDashboardController');
+const adminManagerController = require('../controllers/adminManagerController');
+const managerDashboardController = require('../controllers/managerDashboardController');
+const managerStaffController = require('../controllers/managerStaffController');
+const managerMedicineController = require('../controllers/managerMedicineController');
+const medicineController = require('../controllers/medicineController');
+const pharmacistController = require('../controllers/pharmacistController');
 const authRoutes = require('./authRoutes');
 const authMiddleware = require('../middleware/auth');
+const adminAuth = require('../middleware/adminAuth');
+const managerAuth = require('../middleware/managerAuth');
+const pharmacistAuth = require('../middleware/pharmacistAuth');
+const requirePasswordChange = require('../middleware/requirePasswordChange');
 
 // Authentication routes
 router.use('/auth', authRoutes);
+
+// Admin Dashboard Routes (Admin only - summary data only)
+router.get('/admin/dashboard', authMiddleware, adminAuth, adminDashboardController.getDashboardSummary);
+router.get('/admin/dashboard/branches', authMiddleware, adminAuth, adminDashboardController.getTotalBranches);
+router.get('/admin/dashboard/users', authMiddleware, adminAuth, adminDashboardController.getTotalUsers);
+router.get('/admin/dashboard/sales', authMiddleware, adminAuth, adminDashboardController.getTotalSales);
+router.get('/admin/dashboard/branches-list', authMiddleware, adminAuth, adminDashboardController.getBranchList);
+
+// Admin Manager Management Routes (Admin only - view and activate managers)
+router.get('/admin/managers', authMiddleware, adminAuth, adminManagerController.getAllManagers);
+router.get('/admin/managers/pending', authMiddleware, adminAuth, adminManagerController.getPendingManagers);
+router.get('/admin/managers/activated', authMiddleware, adminAuth, adminManagerController.getActivatedManagers);
+router.get('/admin/managers/branch/:branch_id', authMiddleware, adminAuth, adminManagerController.getManagersByBranch);
+router.put('/admin/managers/:user_id/activate', authMiddleware, adminAuth, adminManagerController.activateManager);
+router.put('/admin/managers/:user_id/deactivate', authMiddleware, adminAuth, adminManagerController.deactivateManager);
+
+// Manager Dashboard Routes (Manager only - branch-specific data)
+router.get('/manager/dashboard', authMiddleware, managerAuth, managerDashboardController.getDashboardSummary);
+router.get('/manager/dashboard/branch', authMiddleware, managerAuth, managerDashboardController.getBranchOverview);
+router.get('/manager/dashboard/inventory', authMiddleware, managerAuth, managerDashboardController.getInventorySummary);
+router.get('/manager/dashboard/sales', authMiddleware, managerAuth, managerDashboardController.getSalesSummary);
+router.get('/manager/dashboard/notifications', authMiddleware, managerAuth, managerDashboardController.getNotifications);
+
+// Manager Staff Management Routes (Manager only - manage their branch staff)
+router.post('/manager/staff', authMiddleware, managerAuth, managerStaffController.createStaff);
+router.post('/manager/staff/verify', authMiddleware, managerAuth, managerStaffController.verifyStaffCode);
+router.get('/manager/staff', authMiddleware, managerAuth, managerStaffController.getStaffMembers);
+router.put('/manager/staff/:user_id', authMiddleware, managerAuth, managerStaffController.updateStaff);
+router.delete('/manager/staff/:user_id', authMiddleware, managerAuth, managerStaffController.removeStaff);
+router.post('/manager/staff/:user_id/reset-password', authMiddleware, managerAuth, managerStaffController.resetStaffPassword);
+
+// Manager Medicine Management Routes (Manager only - view and manage medicines)
+router.get('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.getAllMedicines);
+router.get('/manager/medicines/:medicine_id', authMiddleware, managerAuth, managerMedicineController.getMedicineById);
+router.post('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.addMedicineToStock);
+router.put('/manager/medicines/:medicine_id/stock', authMiddleware, managerAuth, managerMedicineController.updateMedicineStock);
+router.delete('/manager/medicines/:medicine_id', authMiddleware, managerAuth, managerMedicineController.removeMedicineFromStock);
+
+// ============================================================================
+// PHARMACIST ROUTES (Pharmacist only - view medicines, inventory, sales, reports)
+// ============================================================================
+
+// 1. Medicine Information (View Only)
+router.get('/pharmacist/medicines', authMiddleware, requirePasswordChange, pharmacistAuth, medicineController.getAllMedicines);
+router.get('/pharmacist/medicines/search', authMiddleware, requirePasswordChange, pharmacistAuth, medicineController.searchMedicines);
+router.get('/pharmacist/medicines/category/:category_id', authMiddleware, requirePasswordChange, pharmacistAuth, medicineController.getMedicinesByCategory);
+router.get('/pharmacist/medicines/:medicine_id', authMiddleware, requirePasswordChange, pharmacistAuth, medicineController.getMedicineById);
+
+// 2. Inventory Interactions (Limited)
+router.post('/pharmacist/inventory/request-restock', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.requestRestock);
+router.post('/pharmacist/inventory/mark-low-stock', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.markLowStock);
+router.get('/pharmacist/inventory/stock-history', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getStockHistory);
+
+// 2.5. Medicine Stock Management (Add/Remove Medicine)
+router.post('/pharmacist/medicines', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.addMedicineToStock);
+router.put('/pharmacist/medicines/:medicine_id/stock', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.updateMedicineStock);
+router.delete('/pharmacist/medicines/:medicine_id', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.removeMedicineFromStock);
+
+// 3. Sales Support
+router.post('/pharmacist/sales', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.createSale);
+router.get('/pharmacist/sales/:sale_id', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getSaleById);
+
+// 4. Reports (Limited)
+router.get('/pharmacist/reports/low-stock', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getLowStockReport);
+router.get('/pharmacist/reports/expiry', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getExpiryReport);
+router.get('/pharmacist/reports/inventory-summary', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getInventorySummary);
 
 // Protected user routes (require authentication)
 router.get('/users', authMiddleware, userController.getAllUsers);
@@ -16,6 +93,10 @@ router.get('/users/:id', authMiddleware, userController.getUserById);
 router.post('/users', authMiddleware, userController.createUser);
 router.put('/users/:id', authMiddleware, userController.updateUser);
 router.delete('/users/:id', authMiddleware, userController.deleteUser);
+
+// Debug routes (for troubleshooting - remove in production)
+const debugController = require('../controllers/debugController');
+router.get('/debug/account-status', debugController.checkAccountStatus);
 
 // Health check route
 router.get('/health', (req, res) => {

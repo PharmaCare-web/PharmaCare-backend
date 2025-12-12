@@ -73,6 +73,18 @@ router.get('/', (req, res) => {
         headers: {
           Authorization: 'Bearer <token> (required)'
         }
+      },
+      changePassword: {
+        method: 'POST',
+        path: '/api/auth/change-password',
+        description: 'Change user password (protected)',
+        headers: {
+          Authorization: 'Bearer <token> (required)'
+        },
+        body: {
+          current_password: 'string (required)',
+          new_password: 'string (required, min 6 chars)'
+        }
       }
     },
     roles: {
@@ -99,6 +111,7 @@ router.post('/forgot-password', authController.forgotPassword);
 // Protected routes - require authentication
 router.get('/me', authMiddleware, authController.getMe);
 router.post('/logout', authMiddleware, authController.logout);
+router.post('/change-password', authMiddleware, authController.changePassword);
 
 module.exports = router;
 
