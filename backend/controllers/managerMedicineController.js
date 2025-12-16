@@ -222,7 +222,7 @@ const addMedicineToStock = async (req, res, next) => {
       `INSERT INTO medicine (
         branch_id, category_id, name, type, quantity_in_stock, 
         price, expiry_date, barcode, manufacturer
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING medicine_id`,
       [
         managerBranchId,
         category_id,
@@ -235,6 +235,11 @@ const addMedicineToStock = async (req, res, next) => {
         manufacturerName || null
       ]
     );
+
+    const medicineId = result.length > 0 ? (result[0].medicine_id || result[0].id) : null;
+    if (!medicineId) {
+      throw new Error('Failed to create medicine record');
+    }
 
     // Get created medicine with details
     const [newMedicine] = await pool.execute(
@@ -251,7 +256,7 @@ const addMedicineToStock = async (req, res, next) => {
       FROM medicine m
       LEFT JOIN category c ON m.category_id = c.category_id
       WHERE m.medicine_id = ?`,
-      [result.insertId]
+      [medicineId]
     );
 
     // Check if low stock and create notification

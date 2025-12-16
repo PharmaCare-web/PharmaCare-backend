@@ -31,7 +31,7 @@ console.log(`   DB_SSL: ${process.env.DB_SSL || 'NOT SET - using Render default'
 // FORCE Render database credentials (override .env if wrong)
 const dbHost = 'dpg-d4t1j075r7bs73c71060-a.frankfurt-postgres.render.com';
 const dbPort = 5432;
-const dbUser = 'pharmacare_user';
+const dbUser = 'pharmacare_users';
 const dbPassword = '6qS1ylyQXCvF6FVMhGDrsMTAxauAh1x5';
 const dbName = 'pharmacare';
 const dbSSL = true; // Always use SSL for Render
@@ -39,7 +39,7 @@ const dbSSL = true; // Always use SSL for Render
 const pool = new Pool({
   host: dbHost,
   port: dbPort,
-  user: dbUser,
+  users: dbUser,
   password: dbPassword,
   database: dbName,
   ssl: dbSSL ? {
@@ -107,7 +107,7 @@ async function setupDatabase() {
     // Check admin account
     const adminResult = await client.query(`
       SELECT u.email, u.full_name, u.is_active, r.role_name 
-      FROM "user" u 
+      FROM users u 
       LEFT JOIN role r ON u.role_id = r.role_id 
       WHERE u.email = 'admin@pharmacare.com'
     `);

@@ -15,7 +15,7 @@ const checkAccountStatus = async (req, res, next) => {
       });
     }
 
-    const [users] = await pool.execute(
+    const [userss] = await pool.execute(
       `SELECT 
         u.user_id,
         u.full_name,
@@ -29,40 +29,40 @@ const checkAccountStatus = async (req, res, next) => {
         r.role_name,
         b.branch_name,
         u.created_at
-      FROM user u
+      FROM users u
       LEFT JOIN role r ON u.role_id = r.role_id
       LEFT JOIN branch b ON u.branch_id = b.branch_id
       WHERE u.email = ?`,
       [email]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Account not found with this email'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
     // Remove sensitive data
-    const { verification_code, ...safeUser } = user;
+    const { verification_code, ...safeUser } = users;
 
     res.json({
       success: true,
       message: 'Account status retrieved',
       data: {
         ...safeUser,
-        hasVerificationCode: !!user.verification_code,
-        verificationCodeExpired: user.verification_code_expires 
-          ? new Date(user.verification_code_expires) < new Date() 
+        hasVerificationCode: !!users.verification_code,
+        verificationCodeExpired: users.verification_code_expires 
+          ? new Date(users.verification_code_expires) < new Date() 
           : null,
-        canLogin: user.is_active === 1 && user.is_email_verified === 1,
+        canLogin: users.is_active === 1 && users.is_email_verified === 1,
         issues: [
-          user.is_active === 0 ? 'Account is not active' : null,
-          user.is_email_verified === 0 ? 'Email is not verified' : null,
-          user.verification_code && new Date(user.verification_code_expires) < new Date() ? 'Verification code has expired' : null,
-          user.is_temporary_password === 1 ? 'Using temporary password - must change on first login' : null
+          users.is_active === 0 ? 'Account is not active' : null,
+          users.is_email_verified === 0 ? 'Email is not verified' : null,
+          users.verification_code && new Date(users.verification_code_expires) < new Date() ? 'Verification code has expired' : null,
+          users.is_temporary_password === 1 ? 'Using temporary password - must change on first login' : null
         ].filter(Boolean)
       }
     });

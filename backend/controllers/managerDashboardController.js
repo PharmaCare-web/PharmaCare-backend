@@ -8,7 +8,7 @@ const bcrypt = require('bcryptjs');
 // Get complete dashboard summary for manager's branch
 const getDashboardSummary = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
 
     if (!managerBranchId) {
       return res.status(400).json({
@@ -37,7 +37,7 @@ const getDashboardSummary = async (req, res, next) => {
     // Get manager count (how many managers in this branch)
     const [managerCount] = await pool.execute(
       `SELECT COUNT(*) as total
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.branch_id = ? 
        AND r.role_name = 'Manager'`,
@@ -47,7 +47,7 @@ const getDashboardSummary = async (req, res, next) => {
     // Get employee count (Pharmacists and Cashiers in this branch)
     const [employeeCount] = await pool.execute(
       `SELECT COUNT(*) as total
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.branch_id = ? 
        AND r.role_name IN ('Pharmacist', 'Cashier')`,
@@ -57,7 +57,7 @@ const getDashboardSummary = async (req, res, next) => {
     // Get active/inactive employee counts (Pharmacists and Cashiers only)
     const [activeCount] = await pool.execute(
       `SELECT COUNT(*) as active
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.branch_id = ? 
        AND r.role_name IN ('Pharmacist', 'Cashier')
@@ -67,7 +67,7 @@ const getDashboardSummary = async (req, res, next) => {
 
     const [inactiveCount] = await pool.execute(
       `SELECT COUNT(*) as inactive
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.branch_id = ? 
        AND r.role_name IN ('Pharmacist', 'Cashier')
@@ -234,7 +234,7 @@ const getDashboardSummary = async (req, res, next) => {
 // Get branch overview only
 const getBranchOverview = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
 
     if (!managerBranchId) {
       return res.status(400).json({
@@ -262,7 +262,7 @@ const getBranchOverview = async (req, res, next) => {
          COUNT(*) as total,
          SUM(CASE WHEN u.is_active = TRUE THEN 1 ELSE 0 END) as active,
          SUM(CASE WHEN u.is_active = FALSE THEN 1 ELSE 0 END) as inactive
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.branch_id = ? 
        AND r.role_name IN ('Pharmacist', 'Cashier')`,
@@ -272,7 +272,7 @@ const getBranchOverview = async (req, res, next) => {
     // Get manager count for this branch
     const [managerCount] = await pool.execute(
       `SELECT COUNT(*) as total
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.branch_id = ? 
        AND r.role_name = 'Manager'`,
@@ -303,7 +303,7 @@ const getBranchOverview = async (req, res, next) => {
 // Get inventory summary
 const getInventorySummary = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
 
     const [inventoryData] = await pool.execute(
       `SELECT 
@@ -359,7 +359,7 @@ const getInventorySummary = async (req, res, next) => {
 // Get sales summary with day, month, year
 const getSalesSummary = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
     const { year } = req.query; // Optional: filter by specific year
 
     const [salesToday] = await pool.execute(
@@ -498,7 +498,7 @@ const getSalesSummary = async (req, res, next) => {
 // Get notifications/alerts
 const getNotifications = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
 
     // Get notifications from notification table
     const [notifications] = await pool.execute(

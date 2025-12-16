@@ -8,8 +8,8 @@ const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emai
 // Create new staff member (Pharmacist or Cashier)
 const createStaff = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
-    const managerUserId = req.user.user_id;
+    const managerBranchId = req.users.branch_id;
+    const managerUserId = req.users.user_id;
 
     if (!managerBranchId) {
       return res.status(400).json({
@@ -45,7 +45,7 @@ const createStaff = async (req, res, next) => {
 
     // Check if email already exists
     const [existingUsers] = await pool.execute(
-      'SELECT user_id FROM user WHERE email = ?',
+      'SELECT user_id FROM users WHERE email = ?',
       [email]
     );
 
@@ -68,18 +68,18 @@ const createStaff = async (req, res, next) => {
     const saltRounds = 10;
     const hashedPlaceholderPassword = await bcrypt.hash(placeholderPassword, saltRounds);
 
-    // Use first role_id for the user table (for backward compatibility)
+    // Use first role_id for the users table (for backward compatibility)
     // Multiple roles will be handled separately if needed
     const primaryRoleId = role_ids[0];
 
-    // Create user account as INACTIVE and NOT email verified
+    // Create users account as INACTIVE and NOT email verified
     // Account will be activated after manager verifies the email code
     const [result] = await pool.execute(
-      `INSERT INTO user (
+      `INSERT INTO users (
         full_name, email, password, role_id, branch_id, 
         is_active, is_email_verified, verification_code, verification_code_expires,
         is_temporary_password, must_change_password, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING user_id`,
       [
         full_name,
         email,
@@ -96,7 +96,10 @@ const createStaff = async (req, res, next) => {
       ]
     );
 
-    const newUserId = result.insertId;
+    const newUserId = result.length > 0 ? (result[0].user_id || result[0].id) : null;
+    if (!newUserId) {
+      throw new Error('Failed to create users record');
+    }
 
     // Send verification code email to staff member
     let emailSent = false;
@@ -110,11 +113,11 @@ const createStaff = async (req, res, next) => {
       }
     }
 
-    // Get created user info
+    // Get created users info
     const [newUser] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
               u.is_active, u.is_email_verified, r.role_name, b.branch_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE u.user_id = ?`,
@@ -125,7 +128,7 @@ const createStaff = async (req, res, next) => {
       success: true,
       message: 'Staff member account created. Verification code sent to email.',
       data: {
-        user: newUser[0],
+        users: newUser[0],
         verificationCode: emailSent ? undefined : verificationCode,  // Only return if email not sent
         emailSent: emailSent,
         note: emailSent 
@@ -142,7 +145,7 @@ const createStaff = async (req, res, next) => {
 // Get all staff members for manager's branch
 const getStaffMembers = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
 
     if (!managerBranchId) {
       return res.status(400).json({
@@ -163,7 +166,7 @@ const getStaffMembers = async (req, res, next) => {
          u.created_at,
          u.last_login,
          r.role_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.branch_id = ?
        AND r.role_name IN ('Pharmacist', 'Cashier')
@@ -186,14 +189,14 @@ const getStaffMembers = async (req, res, next) => {
 // Update staff member (activate/deactivate, change role)
 const updateStaff = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
     const { user_id } = req.params;
     const { is_active, role_id } = req.body;
 
     // Verify staff belongs to manager's branch
     const [staff] = await pool.execute(
       `SELECT u.user_id, u.branch_id, r.role_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.user_id = ?
        AND u.branch_id = ?
@@ -247,15 +250,15 @@ const updateStaff = async (req, res, next) => {
     values.push(user_id);
 
     await pool.execute(
-      `UPDATE user SET ${updates.join(', ')} WHERE user_id = ?`,
+      `UPDATE users SET ${updates.join(', ')} WHERE user_id = ?`,
       values
     );
 
-    // Get updated user
+    // Get updated users
     const [updatedUser] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.role_id, u.is_active, 
               r.role_name, b.branch_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE u.user_id = ?`,
@@ -276,13 +279,13 @@ const updateStaff = async (req, res, next) => {
 // Remove/Delete staff member
 const removeStaff = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
     const { user_id } = req.params;
 
     // Verify staff belongs to manager's branch
     const [staff] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.branch_id, r.role_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.user_id = ?
        AND u.branch_id = ?
@@ -299,7 +302,7 @@ const removeStaff = async (req, res, next) => {
 
     // Deactivate instead of delete (soft delete)
     await pool.execute(
-      'UPDATE user SET is_active = FALSE WHERE user_id = ?',
+      'UPDATE users SET is_active = FALSE WHERE user_id = ?',
       [user_id]
     );
 
@@ -321,13 +324,13 @@ const removeStaff = async (req, res, next) => {
 // Reset staff password (generate new temporary password)
 const resetStaffPassword = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
     const { user_id } = req.params;
 
     // Verify staff belongs to manager's branch
     const [staff] = await pool.execute(
       `SELECT u.user_id, u.email, u.full_name, u.branch_id, r.role_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.user_id = ?
        AND u.branch_id = ?
@@ -365,7 +368,7 @@ const resetStaffPassword = async (req, res, next) => {
 
     // Update password
     await pool.execute(
-      `UPDATE user 
+      `UPDATE users 
        SET password = ?, 
            is_temporary_password = TRUE, 
            must_change_password = TRUE
@@ -402,7 +405,7 @@ const resetStaffPassword = async (req, res, next) => {
 // Verify staff email with verification code and activate account
 const verifyStaffCode = async (req, res, next) => {
   try {
-    const managerBranchId = req.user.branch_id;
+    const managerBranchId = req.users.branch_id;
     const { user_id, email, verification_code } = req.body;
 
     // Accept either user_id OR email (for convenience)
@@ -428,7 +431,7 @@ const verifyStaffCode = async (req, res, next) => {
       // Verify staff belongs to manager's branch using user_id
       query = `SELECT u.user_id, u.email, u.full_name, u.branch_id, u.verification_code, 
                       u.verification_code_expires, u.is_email_verified, r.role_name
-               FROM user u
+               FROM users u
                LEFT JOIN role r ON u.role_id = r.role_id
                WHERE u.user_id = ?
                AND u.branch_id = ?
@@ -438,7 +441,7 @@ const verifyStaffCode = async (req, res, next) => {
       // Verify staff belongs to manager's branch using email
       query = `SELECT u.user_id, u.email, u.full_name, u.branch_id, u.verification_code, 
                       u.verification_code_expires, u.is_email_verified, r.role_name
-               FROM user u
+               FROM users u
                LEFT JOIN role r ON u.role_id = r.role_id
                WHERE u.email = ?
                AND u.branch_id = ?
@@ -505,10 +508,10 @@ const verifyStaffCode = async (req, res, next) => {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(temporaryPassword, saltRounds);
 
-    // Update user: verify email, activate account, set temporary password
+    // Update users: verify email, activate account, set temporary password
     // For staff accounts (Pharmacist/Cashier), activate immediately - NO admin approval needed
     const [updateResult] = await pool.execute(
-      `UPDATE user 
+      `UPDATE users 
        SET is_email_verified = 1,
            verification_code = NULL,
            verification_code_expires = NULL,
@@ -544,12 +547,12 @@ const verifyStaffCode = async (req, res, next) => {
       }
     }
 
-    // Get updated user info and verify activation
+    // Get updated users info and verify activation
     const [updatedUser] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
               u.is_active, u.is_email_verified, u.is_temporary_password, 
               u.must_change_password, r.role_name, b.branch_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE u.user_id = ?`,
@@ -559,31 +562,31 @@ const verifyStaffCode = async (req, res, next) => {
     if (updatedUser.length === 0) {
       return res.status(500).json({
         success: false,
-        message: 'Failed to retrieve updated user information'
+        message: 'Failed to retrieve updated users information'
       });
     }
 
-    const userData = updatedUser[0];
+    const usersData = updatedUser[0];
     
     // Verify account is actually activated
-    const isActive = userData.is_active === 1 || userData.is_active === true;
-    const isEmailVerified = userData.is_email_verified === 1 || userData.is_email_verified === true;
+    const isActive = usersData.is_active === 1 || usersData.is_active === true;
+    const isEmailVerified = usersData.is_email_verified === 1 || usersData.is_email_verified === true;
     
     if (!isActive || !isEmailVerified) {
-      console.error(`❌ Account activation failed: user_id=${user_id}, is_active=${userData.is_active}, is_email_verified=${userData.is_email_verified}`);
+      console.error(`❌ Account activation failed: user_id=${user_id}, is_active=${usersData.is_active}, is_email_verified=${usersData.is_email_verified}`);
       return res.status(500).json({
         success: false,
         message: 'Account activation failed. Please try again or contact support.'
       });
     }
 
-    console.log(`✅ Staff account successfully activated and verified: user_id=${user_id}, email=${userData.email}, is_active=${userData.is_active}`);
+    console.log(`✅ Staff account successfully activated and verified: user_id=${user_id}, email=${usersData.email}, is_active=${usersData.is_active}`);
 
     res.json({
       success: true,
       message: 'Email verified successfully. Staff account activated automatically (no admin approval needed).',
       data: {
-        user: userData,
+        users: usersData,
         temporaryPassword: emailSent ? undefined : temporaryPassword,  // Only return if email not sent
         emailSent: emailSent,
         accountStatus: {

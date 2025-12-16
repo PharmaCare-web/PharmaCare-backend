@@ -1,20 +1,20 @@
 // Authentication controller
-// Handles user registration, login, logout, and current user info
+// Handles users registration, login, logout, and current users info
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emailService');
 
-// Register new user
+// Register new users
 // NOTE: Only Managers can register. Admin is hard-coded. Pharmacist/Cashier are created by Manager.
 const register = async (req, res, next) => {
   try {
     const { full_name, email, password, role_id, branch_id, branch_name, location } = req.body;
 
-    // Check if user already exists
+    // Check if users already exists
     const [existingUsers] = await pool.execute(
-      'SELECT user_id FROM user WHERE email = ?',
+      'SELECT user_id FROM users WHERE email = ?',
       [email]
     );
 
@@ -82,12 +82,14 @@ const register = async (req, res, next) => {
         });
       }
 
-      // Create new branch (created_by will be set after user is created)
+      // Create new branch (created_by will be set after users is created)
       const [branchResult] = await pool.execute(
-        'INSERT INTO branch (pharmacy_id, branch_name, location) VALUES (?, ?, ?)',
+        'INSERT INTO branch (pharmacy_id, branch_name, location) VALUES (?, ?, ?) RETURNING *',
         [pharmacy_id, branch_name, location]
       );
-      finalBranchId = branchResult.insertId;
+      if (branchResult.length > 0) {
+        finalBranchId = branchResult[0].branch_id || branchResult[0].id;
+      }
     } else if (branch_id) {
       // Manager is joining an existing branch
       const [branches] = await pool.execute('SELECT branch_id FROM branch WHERE branch_id = ?', [branch_id]);
@@ -118,36 +120,42 @@ const register = async (req, res, next) => {
     // Managers are created as INACTIVE (pending admin activation)
     const isActive = false;
 
-    // Insert new manager user
+    // Insert new manager users
     // Manager is inactive until admin activates
-    let result;
+    let createdUserId = null;
     try {
-      [result] = await pool.execute(
-        `INSERT INTO user (
+      const [inserted] = await pool.execute(
+        `INSERT INTO users (
           full_name, email, password, role_id, branch_id, 
           is_active, verification_code, verification_code_expires, is_email_verified
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING user_id`,
         [full_name, email, hashedPassword, role_id, finalBranchId, isActive, verificationCode, expirationTime, false]
       );
+      if (inserted.length > 0) {
+        createdUserId = inserted[0].user_id;
+      }
     } catch (insertError) {
       // If verification columns don't exist, insert without them
       if (insertError.code && insertError.code.startsWith('ER_BAD_FIELD')) {
         console.warn('Verification columns not found, registering without email verification');
-        [result] = await pool.execute(
-          'INSERT INTO user (full_name, email, password, role_id, branch_id, is_active) VALUES (?, ?, ?, ?, ?, ?)',
+        const [insertedFallback] = await pool.execute(
+          'INSERT INTO users (full_name, email, password, role_id, branch_id, is_active) VALUES (?, ?, ?, ?, ?, ?) RETURNING user_id',
           [full_name, email, hashedPassword, role_id, finalBranchId, isActive]
         );
+        if (insertedFallback.length > 0) {
+          createdUserId = insertedFallback[0].user_id;
+        }
       } else {
         throw insertError;
       }
     }
 
     // Update branch.created_by if this manager created the branch
-    if (branch_name && finalBranchId) {
+    if (branch_name && finalBranchId && createdUserId) {
       try {
         await pool.execute(
           'UPDATE branch SET created_by = ? WHERE branch_id = ?',
-          [result.insertId, finalBranchId]
+          [createdUserId, finalBranchId]
         );
       } catch (updateError) {
         // Log but don't fail registration if created_by column doesn't exist
@@ -155,37 +163,37 @@ const register = async (req, res, next) => {
       }
     }
 
-    // Get the created user with role and branch info
+    // Get the created users with role and branch info
     // Try to include is_email_verified, but handle if column doesn't exist
-    let users;
+    let userss;
     try {
-      [users] = await pool.execute(
+      [userss] = await pool.execute(
         `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, u.created_at, 
                 u.is_email_verified, r.role_name, b.branch_name 
-         FROM user u 
+         FROM users u 
          LEFT JOIN role r ON u.role_id = r.role_id 
          LEFT JOIN branch b ON u.branch_id = b.branch_id 
          WHERE u.user_id = ?`,
-        [result.insertId]
+        [createdUserId]
       );
     } catch (selectError) {
       // If is_email_verified column doesn't exist, select without it
-      if (selectError.code && selectError.code.startsWith('ER_BAD_FIELD')) {
-        [users] = await pool.execute(
+      if ((selectError.code && selectError.code.startsWith('ER_BAD_FIELD')) || selectError.code === '42703') {
+        [userss] = await pool.execute(
           `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, u.created_at, 
                   r.role_name, b.branch_name 
-           FROM user u 
+           FROM users u 
            LEFT JOIN role r ON u.role_id = r.role_id 
            LEFT JOIN branch b ON u.branch_id = b.branch_id 
            WHERE u.user_id = ?`,
-          [result.insertId]
+          [createdUserId]
         );
       } else {
         throw selectError;
       }
     }
 
-    const newUser = users[0];
+    const newUser = userss[0];
 
     // Check if verification columns exist (by checking if is_email_verified was selected)
     const hasVerificationColumns = newUser.hasOwnProperty('is_email_verified');
@@ -214,7 +222,7 @@ const register = async (req, res, next) => {
     }
 
     // Remove password and verification code from response
-    const { password: _, verification_code: __, verification_code_expires: ___, ...userWithoutPassword } = newUser;
+    const { password: _, verification_code: __, verification_code_expires: ___, ...usersWithoutPassword } = newUser;
 
     // Custom message for managers
     let finalMessage = 'Manager account created successfully. Your account is pending admin activation. You will be notified once your account is activated.';
@@ -222,7 +230,7 @@ const register = async (req, res, next) => {
     res.status(201).json({
       success: true,
       message: finalMessage,
-      user: userWithoutPassword,
+      users: usersWithoutPassword,
       requiresVerification: hasVerificationColumns && emailSent,
       requiresActivation: true,
       isActive: false
@@ -239,7 +247,7 @@ const register = async (req, res, next) => {
   }
 };
 
-// Login user
+// Login users
 const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -252,38 +260,38 @@ const login = async (req, res, next) => {
       });
     }
 
-    // Find user by email with role and branch info
-    const [users] = await pool.execute(
+    // Find users by email with role and branch info
+    const [userss] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.password, u.role_id, u.branch_id, 
               u.is_active, u.is_email_verified, u.must_change_password, 
               u.is_temporary_password, u.created_at, r.role_name, b.branch_name 
-       FROM user u 
+       FROM users u 
        LEFT JOIN role r ON u.role_id = r.role_id 
        LEFT JOIN branch b ON u.branch_id = b.branch_id 
        WHERE u.email = ?`,
       [email]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
     // Debug logging
-    console.log(`Login attempt: email=${email}, is_active=${user.is_active}, role_name=${user.role_name}, is_email_verified=${user.is_email_verified}`);
+    console.log(`Login attempt: email=${email}, is_active=${users.is_active}, role_name=${users.role_name}, is_email_verified=${users.is_email_verified}`);
 
-    // Check if user is active - different messages for different roles
+    // Check if users is active - different messages for different roles
     // MySQL returns BOOLEAN as 0/1, so check both
-    const isActive = user.is_active === true || user.is_active === 1 || user.is_active === '1';
+    const isActive = users.is_active === true || users.is_active === 1 || users.is_active === '1';
     
     if (!isActive) {
       // Staff accounts (Pharmacist/Cashier) are activated automatically after email verification
       // Only Managers need admin activation
-      const roleName = user.role_name || '';
+      const roleName = users.role_name || '';
       
       if (roleName === 'Manager') {
         return res.status(401).json({
@@ -292,7 +300,7 @@ const login = async (req, res, next) => {
         });
       } else if (roleName === 'Pharmacist' || roleName === 'Cashier') {
         // Check if email is verified
-        const isEmailVerified = user.is_email_verified === true || user.is_email_verified === 1 || user.is_email_verified === '1';
+        const isEmailVerified = users.is_email_verified === true || users.is_email_verified === 1 || users.is_email_verified === '1';
         
         if (!isEmailVerified) {
           return res.status(401).json({
@@ -314,27 +322,27 @@ const login = async (req, res, next) => {
     }
 
     // Verify password
-    if (!user.password) {
+    if (!users.password) {
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
       });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await bcrypt.compare(password, users.password);
 
     if (!isPasswordValid) {
       // Provide more helpful error message based on account status
       let errorMessage = 'Invalid email or password';
       
       // If account is not email verified, suggest verification
-      if (user.is_email_verified === false || user.is_email_verified === 0) {
-        if (user.role_name === 'Pharmacist' || user.role_name === 'Cashier') {
+      if (users.is_email_verified === false || users.is_email_verified === 0) {
+        if (users.role_name === 'Pharmacist' || users.role_name === 'Cashier') {
           errorMessage = 'Account not verified yet. Please contact your manager to verify your email with the verification code.';
         } else {
           errorMessage = 'Invalid email or password. If you just registered, please verify your email first.';
         }
-      } else if (user.is_temporary_password === true || user.is_temporary_password === 1) {
+      } else if (users.is_temporary_password === true || users.is_temporary_password === 1) {
         // If using temporary password, provide more specific message
         errorMessage = 'Invalid temporary password. Please check the email sent to you for the correct temporary password, or contact your manager.';
       }
@@ -348,9 +356,9 @@ const login = async (req, res, next) => {
     // Check if email is verified - different handling for different roles
     // Admin and Manager: email verification is optional/separate from activation
     // Pharmacist/Cashier: email verification is required (handled by manager)
-    if (user.is_email_verified !== undefined && user.is_email_verified !== null) {
-      const isEmailVerified = user.is_email_verified === true || user.is_email_verified === 1 || user.is_email_verified === '1';
-      const roleName = user.role_name || '';
+    if (users.is_email_verified !== undefined && users.is_email_verified !== null) {
+      const isEmailVerified = users.is_email_verified === true || users.is_email_verified === 1 || users.is_email_verified === '1';
+      const roleName = users.role_name || '';
       
       // For Pharmacist and Cashier, email must be verified (manager verifies it)
       if (!isEmailVerified && (roleName === 'Pharmacist' || roleName === 'Cashier')) {
@@ -365,7 +373,7 @@ const login = async (req, res, next) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { userId: user.user_id, email: user.email, roleId: user.role_id, branchId: user.branch_id },
+      { userId: users.user_id, email: users.email, roleId: users.role_id, branchId: users.branch_id },
       process.env.JWT_SECRET || 'your-secret-key-change-in-production',
       { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
@@ -373,8 +381,8 @@ const login = async (req, res, next) => {
     // Update last login (wrap in try-catch to prevent errors if column doesn't exist)
     try {
       await pool.execute(
-        'UPDATE user SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?',
-        [user.user_id]
+        'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = ?',
+        [users.user_id]
       );
     } catch (updateError) {
       // Log but don't fail login if last_login update fails
@@ -385,12 +393,12 @@ const login = async (req, res, next) => {
       }
     }
 
-    // Check if user must change password
-    const mustChangePassword = user.must_change_password === true || user.must_change_password === 1 || 
-                               user.is_temporary_password === true || user.is_temporary_password === 1;
+    // Check if users must change password
+    const mustChangePassword = users.must_change_password === true || users.must_change_password === 1 || 
+                               users.is_temporary_password === true || users.is_temporary_password === 1;
 
     // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
+    const { password: _, ...usersWithoutPassword } = users;
 
     return res.json({
       success: true,
@@ -398,7 +406,7 @@ const login = async (req, res, next) => {
         ? 'Login successful. Please change your password.'
         : 'Login successful',
       token,
-      user: userWithoutPassword,
+      users: usersWithoutPassword,
       mustChangePassword: mustChangePassword
     });
   } catch (error) {
@@ -407,34 +415,34 @@ const login = async (req, res, next) => {
   }
 };
 
-// Get current user (protected route)
+// Get current users (protected route)
 const getMe = async (req, res, next) => {
   try {
     // User is attached to req by auth middleware
-    // Fetch fresh user data with role and branch info
-    const [users] = await pool.execute(
+    // Fetch fresh users data with role and branch info
+    const [userss] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
               u.is_active, u.created_at, u.last_login,
               r.role_name, b.branch_name, b.location 
-       FROM user u 
+       FROM users u 
        LEFT JOIN role r ON u.role_id = r.role_id 
        LEFT JOIN branch b ON u.branch_id = b.branch_id 
        WHERE u.user_id = ?`,
       [req.user.user_id]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
     
     res.json({
       success: true,
-      user: user
+      users: users
     });
   } catch (error) {
     next(error);
@@ -453,25 +461,25 @@ const verifyEmail = async (req, res, next) => {
       });
     }
 
-    // Find user by email and verification code
-    const [users] = await pool.execute(
+    // Find users by email and verification code
+    const [userss] = await pool.execute(
       `SELECT user_id, email, verification_code, verification_code_expires, is_email_verified 
-       FROM user 
+       FROM users 
        WHERE email = ? AND verification_code = ?`,
       [email, verification_code]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'Invalid verification code or email'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
     // Check if already verified
-    if (user.is_email_verified) {
+    if (users.is_email_verified) {
       return res.status(400).json({
         success: false,
         message: 'Email is already verified'
@@ -480,7 +488,7 @@ const verifyEmail = async (req, res, next) => {
 
     // Check if verification code has expired
     const now = new Date();
-    const expirationTime = new Date(user.verification_code_expires);
+    const expirationTime = new Date(users.verification_code_expires);
 
     if (now > expirationTime) {
       return res.status(400).json({
@@ -491,28 +499,28 @@ const verifyEmail = async (req, res, next) => {
 
     // Verify the email
     await pool.execute(
-      `UPDATE user 
+      `UPDATE users 
        SET is_email_verified = TRUE, 
            verification_code = NULL, 
            verification_code_expires = NULL 
        WHERE user_id = ?`,
-      [user.user_id]
+      [users.user_id]
     );
 
-    // Get updated user with role and branch info
+    // Get updated users with role and branch info
     const [updatedUsers] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
               u.is_email_verified, r.role_name, b.branch_name 
-       FROM user u 
+       FROM users u 
        LEFT JOIN role r ON u.role_id = r.role_id 
        LEFT JOIN branch b ON u.branch_id = b.branch_id 
        WHERE u.user_id = ?`,
-      [user.user_id]
+      [users.user_id]
     );
 
     const verifiedUser = updatedUsers[0];
 
-    // Generate JWT token for verified user
+    // Generate JWT token for verified users
     const token = jwt.sign(
       { 
         userId: verifiedUser.user_id, 
@@ -525,13 +533,13 @@ const verifyEmail = async (req, res, next) => {
     );
 
     // Remove password from response
-    const { password: _, ...userWithoutPassword } = verifiedUser;
+    const { password: _, ...usersWithoutPassword } = verifiedUser;
 
     res.json({
       success: true,
       message: 'Email verified successfully',
       token,
-      user: userWithoutPassword
+      users: usersWithoutPassword
     });
   } catch (error) {
     console.error('Verify email error:', error);
@@ -551,23 +559,23 @@ const resendVerificationCode = async (req, res, next) => {
       });
     }
 
-    // Find user by email
-    const [users] = await pool.execute(
-      'SELECT user_id, email, full_name, is_email_verified FROM user WHERE email = ?',
+    // Find users by email
+    const [userss] = await pool.execute(
+      'SELECT user_id, email, full_name, is_email_verified FROM users WHERE email = ?',
       [email]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
     // Check if already verified
-    if (user.is_email_verified) {
+    if (users.is_email_verified) {
       return res.status(400).json({
         success: false,
         message: 'Email is already verified'
@@ -580,14 +588,14 @@ const resendVerificationCode = async (req, res, next) => {
 
     // Update verification code in database
     await pool.execute(
-      'UPDATE user SET verification_code = ?, verification_code_expires = ? WHERE user_id = ?',
-      [verificationCode, expirationTime, user.user_id]
+      'UPDATE users SET verification_code = ?, verification_code_expires = ? WHERE user_id = ?',
+      [verificationCode, expirationTime, users.user_id]
     );
 
     // Send verification email (only if SMTP is configured)
     if (process.env.SMTP_USER && process.env.SMTP_PASS) {
       try {
-        await sendVerificationEmail(email, verificationCode, user.full_name);
+        await sendVerificationEmail(email, verificationCode, users.full_name);
         console.log(`✅ Verification code resent to ${email}`);
         res.json({
           success: true,
@@ -632,13 +640,13 @@ const forgotPassword = async (req, res, next) => {
       });
     }
 
-    // Find user by email
-    const [users] = await pool.execute(
-      'SELECT user_id, email, full_name, is_active FROM user WHERE email = ?',
+    // Find users by email
+    const [userss] = await pool.execute(
+      'SELECT user_id, email, full_name, is_active FROM users WHERE email = ?',
       [email]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       // Don't reveal if email exists for security reasons
       return res.json({
         success: true,
@@ -646,10 +654,10 @@ const forgotPassword = async (req, res, next) => {
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
-    // Check if user is active
-    if (user.is_active === false || user.is_active === 0) {
+    // Check if users is active
+    if (users.is_active === false || users.is_active === 0) {
       return res.status(403).json({
         success: false,
         message: 'Account is deactivated. Please contact administrator.'
@@ -696,13 +704,13 @@ const forgotPassword = async (req, res, next) => {
     // Send password reset email first (before changing password)
     // This ensures we don't change the password if email fails
     try {
-      await sendPasswordResetEmail(email, temporaryPassword, user.full_name);
+      await sendPasswordResetEmail(email, temporaryPassword, users.full_name);
       console.log(`✅ Password reset email sent to ${email}`);
       
       // Only update password after email is successfully sent
       await pool.execute(
-        'UPDATE user SET password = ? WHERE user_id = ?',
-        [hashedPassword, user.user_id]
+        'UPDATE users SET password = ? WHERE user_id = ?',
+        [hashedPassword, users.user_id]
       );
       
       res.json({
@@ -726,7 +734,7 @@ const forgotPassword = async (req, res, next) => {
       // Check for common SMTP errors
       if (emailError.message.includes('Invalid login')) {
         errorMessage = 'SMTP authentication failed. Please check your email credentials.';
-        errorDetails = 'The email username or password (app password) is incorrect.';
+        errorDetails = 'The email usersname or password (app password) is incorrect.';
       } else if (emailError.message.includes('Connection timeout') || emailError.message.includes('ECONNREFUSED')) {
         errorMessage = 'Could not connect to email server. Please check your SMTP settings.';
         errorDetails = 'Unable to reach the SMTP server. Check SMTP_HOST and SMTP_PORT in .env file.';
@@ -759,10 +767,10 @@ const forgotPassword = async (req, res, next) => {
   }
 };
 
-// Change password - for users to change their own password
+// Change password - for userss to change their own password
 const changePassword = async (req, res, next) => {
   try {
-    const userId = req.user.user_id; // From auth middleware
+    const usersId = req.user.user_id; // From auth middleware
     const { current_password, new_password } = req.body;
 
     // Validate input
@@ -781,23 +789,23 @@ const changePassword = async (req, res, next) => {
       });
     }
 
-    // Get current user with password
-    const [users] = await pool.execute(
-      'SELECT user_id, password, is_temporary_password, must_change_password FROM user WHERE user_id = ?',
-      [userId]
+    // Get current users with password
+    const [userss] = await pool.execute(
+      'SELECT user_id, password, is_temporary_password, must_change_password FROM users WHERE user_id = ?',
+      [usersId]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
     // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(current_password, user.password);
+    const isCurrentPasswordValid = await bcrypt.compare(current_password, users.password);
 
     if (!isCurrentPasswordValid) {
       return res.status(401).json({
@@ -807,7 +815,7 @@ const changePassword = async (req, res, next) => {
     }
 
     // Check if new password is same as current password
-    const isSamePassword = await bcrypt.compare(new_password, user.password);
+    const isSamePassword = await bcrypt.compare(new_password, users.password);
     if (isSamePassword) {
       return res.status(400).json({
         success: false,
@@ -821,32 +829,32 @@ const changePassword = async (req, res, next) => {
 
     // Update password and clear temporary password flags
     await pool.execute(
-      `UPDATE user 
+      `UPDATE users 
        SET password = ?,
            is_temporary_password = 0,
            must_change_password = 0,
            password_changed_at = CURRENT_TIMESTAMP
        WHERE user_id = ?`,
-      [hashedNewPassword, userId]
+      [hashedNewPassword, usersId]
     );
 
-    // Get updated user info
+    // Get updated users info
     const [updatedUsers] = await pool.execute(
       `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
               u.is_temporary_password, u.must_change_password, r.role_name
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.user_id = ?`,
-      [userId]
+      [usersId]
     );
 
-    console.log(`✅ Password changed successfully for user_id=${userId}`);
+    console.log(`✅ Password changed successfully for user_id=${usersId}`);
 
     res.json({
       success: true,
       message: 'Password changed successfully',
       data: {
-        user: updatedUsers[0]
+        users: updatedUsers[0]
       }
     });
   } catch (error) {
@@ -855,7 +863,7 @@ const changePassword = async (req, res, next) => {
   }
 };
 
-// Logout user
+// Logout users
 const logout = async (req, res, next) => {
   try {
     // In a stateless JWT system, logout is typically handled client-side

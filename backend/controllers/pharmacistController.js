@@ -10,8 +10,8 @@ const pool = require('../config/database');
 // Request restock from Manager
 const requestRestock = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
-    const pharmacistId = req.user.user_id;
+    const branchId = req.users.branch_id;
+    const pharmacistId = req.users.user_id;
     const { medicine_id, requested_quantity, notes } = req.body;
 
     if (!medicine_id || !requested_quantity) {
@@ -41,7 +41,7 @@ const requestRestock = async (req, res, next) => {
       [
         branchId,
         'Restock Request',
-        `Pharmacist ${req.user.full_name} requested ${requested_quantity} units of ${medicine[0].name}. Current stock: ${medicine[0].quantity_in_stock}. ${notes ? 'Notes: ' + notes : ''}`,
+        `Pharmacist ${req.users.full_name} requested ${requested_quantity} units of ${medicine[0].name}. Current stock: ${medicine[0].quantity_in_stock}. ${notes ? 'Notes: ' + notes : ''}`,
         'restock_request'
       ]
     );
@@ -65,7 +65,7 @@ const requestRestock = async (req, res, next) => {
 // Mark item as low stock (notification to Manager)
 const markLowStock = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
+    const branchId = req.users.branch_id;
     const { medicine_id, threshold, notes } = req.body;
 
     if (!medicine_id) {
@@ -105,7 +105,7 @@ const markLowStock = async (req, res, next) => {
     }
 
     // Create low stock notification for manager
-    const notificationMessage = `Pharmacist ${req.user.full_name} marked ${medicine[0].name} as low stock. Current quantity: ${medicine[0].quantity_in_stock}, Threshold: ${stockThreshold}.${notes ? ' Notes: ' + notes : ''}`;
+    const notificationMessage = `Pharmacist ${req.users.full_name} marked ${medicine[0].name} as low stock. Current quantity: ${medicine[0].quantity_in_stock}, Threshold: ${stockThreshold}.${notes ? ' Notes: ' + notes : ''}`;
     
     await pool.execute(
       `INSERT INTO notification (branch_id, title, message, type, is_read)
@@ -137,7 +137,7 @@ const markLowStock = async (req, res, next) => {
 // View stock level changes (history)
 const getStockHistory = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
+    const branchId = req.users.branch_id;
     const { medicine_id } = req.query;
 
     let query = `
@@ -179,8 +179,8 @@ const getStockHistory = async (req, res, next) => {
 // Create new sales order
 const createSale = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
-    const userId = req.user.user_id;
+    const branchId = req.users.branch_id;
+    const usersId = req.users.user_id;
     const { items, payment_type, customer_name, customer_phone } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -230,11 +230,14 @@ const createSale = async (req, res, next) => {
       // Create sale record
       const [saleResult] = await connection.execute(
         `INSERT INTO sale (branch_id, user_id, total_amount, status, sale_date)
-         VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP)`,
-        [branchId, userId, totalAmount]
+         VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP) RETURNING sale_id`,
+        [branchId, usersId, totalAmount]
       );
 
-      const saleId = saleResult.insertId;
+      const saleId = saleResult.length > 0 ? (saleResult[0].sale_id || saleResult[0].id) : null;
+      if (!saleId) {
+        throw new Error('Failed to create sale record');
+      }
 
       // Create sale items and update stock
       for (const item of items) {
@@ -282,7 +285,7 @@ const createSale = async (req, res, next) => {
           p.payment_type,
           p.amount as payment_amount
         FROM sale s
-        LEFT JOIN user u ON s.user_id = u.user_id
+        LEFT JOIN users u ON s.user_id = u.user_id
         LEFT JOIN payment p ON s.sale_id = p.sale_id
         WHERE s.sale_id = ?`,
         [saleId]
@@ -327,7 +330,7 @@ const createSale = async (req, res, next) => {
 // Get sale by ID (for printing receipt)
 const getSaleById = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
+    const branchId = req.users.branch_id;
     const { sale_id } = req.params;
 
     const [sale] = await pool.execute(
@@ -342,7 +345,7 @@ const getSaleById = async (req, res, next) => {
         p.payment_type,
         p.amount as payment_amount
       FROM sale s
-      LEFT JOIN user u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.user_id
       LEFT JOIN branch b ON s.branch_id = b.branch_id
       LEFT JOIN payment p ON s.sale_id = p.sale_id
       WHERE s.sale_id = ? AND s.branch_id = ?`,
@@ -394,8 +397,8 @@ const getSaleById = async (req, res, next) => {
 // Add medicine to stock
 const addMedicineToStock = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
-    const pharmacistId = req.user.user_id;
+    const branchId = req.users.branch_id;
+    const pharmacistId = req.users.user_id;
 
     const {
       name,
@@ -434,7 +437,7 @@ const addMedicineToStock = async (req, res, next) => {
       `INSERT INTO medicine (
         branch_id, category_id, name, type, quantity_in_stock, 
         price, expiry_date, barcode, manufacturer
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING medicine_id`,
       [
         branchId,
         category_id,
@@ -447,6 +450,11 @@ const addMedicineToStock = async (req, res, next) => {
         manufacturer || null
       ]
     );
+
+    const medicineId = result.length > 0 ? (result[0].medicine_id || result[0].id) : null;
+    if (!medicineId) {
+      throw new Error('Failed to create medicine record');
+    }
 
     // Get created medicine with details
     const [newMedicine] = await pool.execute(
@@ -463,7 +471,7 @@ const addMedicineToStock = async (req, res, next) => {
       FROM medicine m
       LEFT JOIN category c ON m.category_id = c.category_id
       WHERE m.medicine_id = ?`,
-      [result.insertId]
+      [medicineId]
     );
 
     // Check if low stock and create notification
@@ -474,7 +482,7 @@ const addMedicineToStock = async (req, res, next) => {
         [
           branchId,
           'Low Stock Alert',
-          `Pharmacist ${req.user.full_name} added new medicine "${name}" with low stock (${quantity_in_stock} units)`
+          `Pharmacist ${req.users.full_name} added new medicine "${name}" with low stock (${quantity_in_stock} units)`
         ]
       );
     }
@@ -493,8 +501,8 @@ const addMedicineToStock = async (req, res, next) => {
 // Update medicine stock quantity (add or remove)
 const updateMedicineStock = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
-    const pharmacistId = req.user.user_id;
+    const branchId = req.users.branch_id;
+    const pharmacistId = req.users.user_id;
     const { medicine_id } = req.params;
     const { quantity_in_stock, price, expiry_date, action, quantity_change } = req.body;
 
@@ -584,7 +592,7 @@ const updateMedicineStock = async (req, res, next) => {
         [
           branchId,
           'Low Stock Alert',
-          `Pharmacist ${req.user.full_name} updated "${medicine[0].name}" stock. Current quantity: ${finalQuantity} units (low stock)`
+          `Pharmacist ${req.users.full_name} updated "${medicine[0].name}" stock. Current quantity: ${finalQuantity} units (low stock)`
         ]
       );
     }
@@ -621,8 +629,8 @@ const updateMedicineStock = async (req, res, next) => {
 // Remove medicine from stock (delete medicine record)
 const removeMedicineFromStock = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
-    const pharmacistId = req.user.user_id;
+    const branchId = req.users.branch_id;
+    const pharmacistId = req.users.user_id;
     const { medicine_id } = req.params;
 
     // Verify medicine belongs to pharmacist's branch
@@ -672,7 +680,7 @@ const removeMedicineFromStock = async (req, res, next) => {
 // View low-stock report
 const getLowStockReport = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
+    const branchId = req.users.branch_id;
     const { threshold = 10 } = req.query; // Default threshold is 10
 
     const [medicines] = await pool.execute(
@@ -707,7 +715,7 @@ const getLowStockReport = async (req, res, next) => {
 // View expiry-date report
 const getExpiryReport = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
+    const branchId = req.users.branch_id;
     const { days = 30 } = req.query; // Default: medicines expiring in next 30 days
 
     const [medicines] = await pool.execute(
@@ -745,7 +753,7 @@ const getExpiryReport = async (req, res, next) => {
 // View branch inventory summary
 const getInventorySummary = async (req, res, next) => {
   try {
-    const branchId = req.user.branch_id;
+    const branchId = req.users.branch_id;
 
     const [summary] = await pool.execute(
       `SELECT 

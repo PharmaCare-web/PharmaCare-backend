@@ -1,81 +1,89 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// PostgreSQL connection pool
-const useSSL = process.env.DB_SSL === 'true';
+// Strong validation for required env vars (especially in production)
+const required = (key) => {
+  if (!process.env[key]) {
+    console.error(`❌ Missing required env: ${key}`);
+    throw new Error(`Missing required env: ${key}`);
+  }
+  return process.env[key];
+};
 
-// Log DB connection info (non-sensitive) to help diagnose issues
+const isProd = process.env.NODE_ENV === 'production';
+const host = isProd ? required('DB_HOST') : process.env.DB_HOST || 'localhost';
+const port = parseInt(process.env.DB_PORT || '5432', 10);
+const user = process.env.DB_USER || 'postgres';
+const password = process.env.DB_PASSWORD || '';
+const database = process.env.DB_NAME || 'pharmacare';
+const useSSL = (process.env.DB_SSL || '').toLowerCase() === 'true';
+
 console.log('🛠️ Database config:');
-console.log(`   host: ${process.env.DB_HOST || 'localhost'}`);
-console.log(`   port: ${process.env.DB_PORT || 5432}`);
-console.log(`   user: ${process.env.DB_USER || 'postgres'}`);
-console.log(`   db:   ${process.env.DB_NAME || 'pharmacare'}`);
+console.log(`   host: ${host}`);
+console.log(`   port: ${port}`);
+console.log(`   user: ${user}`);
+console.log(`   db:   ${database}`);
 console.log(`   ssl:  ${useSSL ? 'enabled' : 'disabled'}`);
 
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 5432,
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'pharmacare',
+  host,
+  port,
+  user,
+  password,
+  database,
   ssl: useSSL
     ? {
-        rejectUnauthorized: false
+        rejectUnauthorized: false,
       }
     : false,
-  max: 10, // Maximum number of clients in the pool
+  max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 15000,
+  connectionTimeoutMillis: 20000,
 });
 
-// Test database connection
-pool.query('SELECT NOW()')
-  .then(result => {
-    console.log('✅ Database connected successfully');
-    console.log('📅 Database time:', result.rows[0].now);
-  })
-  .catch(err => {
-    console.error('❌ Database connection failed:', err.message);
-    console.error('Please check your database configuration in .env file');
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Make sure PostgreSQL is running and database exists');
-    } else {
-      console.error('Make sure your production database is accessible and credentials are correct');
+// Minimal retry on initial connect
+async function testConnection(retries = 3, delayMs = 2000) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      const result = await pool.query('SELECT NOW()');
+      console.log('✅ Database connected successfully');
+      console.log('📅 Database time:', result.rows[0].now);
+      return;
+    } catch (err) {
+      console.error(`❌ DB connect attempt ${i}/${retries} failed: ${err.message}`);
+      if (i === retries) throw err;
+      await new Promise((res) => setTimeout(res, delayMs));
     }
-  });
+  }
+}
 
-// Handle pool errors
-pool.on('error', (err, client) => {
+testConnection().catch((err) => {
+  console.error('❌ Database connection failed after retries:', err.message);
+  console.error('Please verify DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_SSL in .env');
+  process.exit(1);
+});
+
+pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
   process.exit(-1);
 });
 
-// Create a wrapper function that matches MySQL's execute pattern
-// This allows existing code to work without changes
+// MySQL-compatible execute wrapper
 const originalQuery = pool.query.bind(pool);
-
 pool.execute = async (query, params = []) => {
-  try {
-    // Convert MySQL ? placeholders to PostgreSQL $1, $2, etc.
-    let pgQuery = query;
-    let paramIndex = 1;
-    const pgParams = [];
-    
-    // Replace ? with $1, $2, etc.
-    pgQuery = pgQuery.replace(/\?/g, () => {
-      if (paramIndex - 1 < params.length) {
-        pgParams.push(params[paramIndex - 1]);
-      }
-      return `$${paramIndex++}`;
-    });
-    
-    const result = await originalQuery(pgQuery, pgParams);
-    // Return in format similar to MySQL: [rows, fields]
-    // PostgreSQL returns { rows, fields }, MySQL returns [rows, fields]
-    return [result.rows, result.fields || []];
-  } catch (error) {
-    throw error;
-  }
+  let pgQuery = query;
+  let paramIndex = 1;
+  const pgParams = [];
+
+  pgQuery = pgQuery.replace(/\?/g, () => {
+    if (paramIndex - 1 < params.length) {
+      pgParams.push(params[paramIndex - 1]);
+    }
+    return `$${paramIndex++}`;
+  });
+
+  const result = await originalQuery(pgQuery, pgParams);
+  return [result.rows, result.fields || []];
 };
 
 module.exports = pool;

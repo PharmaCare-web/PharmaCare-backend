@@ -19,7 +19,7 @@ const getPendingManagers = async (req, res, next) => {
          r.role_name,
          b.branch_name,
          b.location
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE r.role_name = 'Manager' 
@@ -56,7 +56,7 @@ const getActivatedManagers = async (req, res, next) => {
          r.role_name,
          b.branch_name,
          b.location
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE r.role_name = 'Manager' 
@@ -93,7 +93,7 @@ const getAllManagers = async (req, res, next) => {
          r.role_name,
          b.branch_name,
          b.location
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE r.role_name = 'Manager'
@@ -129,32 +129,32 @@ const activateManager = async (req, res, next) => {
   try {
     const { user_id } = req.params;
 
-    // Verify the user is a manager
-    const [users] = await pool.execute(
+    // Verify the users is a manager
+    const [userss] = await pool.execute(
       `SELECT u.user_id, u.role_id, r.role_name, u.is_active, u.branch_id
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.user_id = ?`,
       [user_id]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
-    if (user.role_name !== 'Manager') {
+    if (users.role_name !== 'Manager') {
       return res.status(400).json({
         success: false,
         message: 'This endpoint is only for activating Manager accounts'
       });
     }
 
-    if (user.is_active) {
+    if (users.is_active) {
       return res.status(400).json({
         success: false,
         message: 'Manager account is already active'
@@ -163,11 +163,11 @@ const activateManager = async (req, res, next) => {
 
     // Activate the manager
     await pool.execute(
-      'UPDATE user SET is_active = TRUE WHERE user_id = ?',
+      'UPDATE users SET is_active = TRUE WHERE user_id = ?',
       [user_id]
     );
 
-    // Get updated user info
+    // Get updated users info
     const [updatedUsers] = await pool.execute(
       `SELECT 
          u.user_id,
@@ -180,7 +180,7 @@ const activateManager = async (req, res, next) => {
          r.role_name,
          b.branch_name,
          b.location
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE u.user_id = ?`,
@@ -203,32 +203,32 @@ const deactivateManager = async (req, res, next) => {
   try {
     const { user_id } = req.params;
 
-    // Verify the user is a manager
-    const [users] = await pool.execute(
+    // Verify the users is a manager
+    const [userss] = await pool.execute(
       `SELECT u.user_id, u.role_id, r.role_name, u.is_active
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.user_id = ?`,
       [user_id]
     );
 
-    if (users.length === 0) {
+    if (userss.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
 
-    const user = users[0];
+    const users = userss[0];
 
-    if (user.role_name !== 'Manager') {
+    if (users.role_name !== 'Manager') {
       return res.status(400).json({
         success: false,
         message: 'This endpoint is only for deactivating Manager accounts'
       });
     }
 
-    if (!user.is_active) {
+    if (!users.is_active) {
       return res.status(400).json({
         success: false,
         message: 'Manager account is already inactive'
@@ -237,11 +237,11 @@ const deactivateManager = async (req, res, next) => {
 
     // Deactivate the manager
     await pool.execute(
-      'UPDATE user SET is_active = FALSE WHERE user_id = ?',
+      'UPDATE users SET is_active = FALSE WHERE user_id = ?',
       [user_id]
     );
 
-    // Get updated user info
+    // Get updated users info
     const [updatedUsers] = await pool.execute(
       `SELECT 
          u.user_id,
@@ -254,7 +254,7 @@ const deactivateManager = async (req, res, next) => {
          r.role_name,
          b.branch_name,
          b.location
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE u.user_id = ?`,
@@ -290,7 +290,7 @@ const getManagersByBranch = async (req, res, next) => {
          r.role_name,
          b.branch_name,
          b.location
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE r.role_name = 'Manager'

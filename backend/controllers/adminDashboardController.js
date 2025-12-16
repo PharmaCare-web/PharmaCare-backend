@@ -4,7 +4,7 @@
 
 const pool = require('../config/database');
 
-// Get dashboard summary (total branches, users, sales count - NO revenue/profit data)
+// Get dashboard summary (total branches, userss, sales count - NO revenue/profit data)
 const getDashboardSummary = async (req, res, next) => {
   try {
     // Get total branches count
@@ -13,26 +13,26 @@ const getDashboardSummary = async (req, res, next) => {
     );
     const totalBranches = branchCount[0].total;
 
-    // Get total users count (excluding admin)
-    const [userCount] = await pool.execute(
+    // Get total userss count (excluding admin)
+    const [usersCount] = await pool.execute(
       `SELECT COUNT(*) as total 
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE r.role_name != 'Admin' OR r.role_name IS NULL`
     );
-    const totalUsers = userCount[0].total;
+    const totalUsers = usersCount[0].total;
 
     // Get manager counts (pending and activated)
     const [pendingManagers] = await pool.execute(
       `SELECT COUNT(*) as total
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE r.role_name = 'Manager' AND u.is_active = FALSE`
     );
 
     const [activatedManagers] = await pool.execute(
       `SELECT COUNT(*) as total
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE r.role_name = 'Manager' AND u.is_active = TRUE`
     );
@@ -81,12 +81,12 @@ const getTotalBranches = async (req, res, next) => {
   }
 };
 
-// Get total users count (excluding admin)
+// Get total userss count (excluding admin)
 const getTotalUsers = async (req, res, next) => {
   try {
     const [result] = await pool.execute(
       `SELECT COUNT(*) as total 
-       FROM user u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE r.role_name != 'Admin' OR r.role_name IS NULL`
     );
@@ -95,10 +95,10 @@ const getTotalUsers = async (req, res, next) => {
       data: {
         totalUsers: result[0].total
       },
-      message: 'Total users retrieved successfully'
+      message: 'Total userss retrieved successfully'
     });
   } catch (error) {
-    console.error('Get total users error:', error);
+    console.error('Get total userss error:', error);
     next(error);
   }
 };
@@ -134,7 +134,7 @@ const getBranchList = async (req, res, next) => {
          b.location,
          COUNT(DISTINCT u.user_id) as total_employees
        FROM branch b
-       LEFT JOIN user u ON b.branch_id = u.branch_id
+       LEFT JOIN users u ON b.branch_id = u.branch_id
        GROUP BY b.branch_id, b.branch_name, b.location
        ORDER BY b.branch_name ASC`
     );
