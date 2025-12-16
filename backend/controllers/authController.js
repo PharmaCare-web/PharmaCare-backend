@@ -201,7 +201,7 @@ const register = async (req, res, next) => {
     let registrationMessage = 'User registered successfully.';
 
     // Send verification email (only if verification columns exist and SMTP is configured)
-    if (result.insertId && hasVerificationColumns) {
+    if (createdUserId && hasVerificationColumns) {
       try {
         // Only try to send email if SMTP is configured
         if (process.env.SMTP_USER && process.env.SMTP_PASS) {
