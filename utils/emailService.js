@@ -1,74 +1,94 @@
-// Email service for sending verification codes
 const nodemailer = require('nodemailer');
 
-// Create reusable transporter object using SMTP transport
+// Constants for Brevo SMTP configuration
+const BREVO_CONFIG = {
+  HOST: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+  PORT: parseInt(process.env.SMTP_PORT, 10) || 587,
+  SECURE: process.env.SMTP_SECURE === 'true' || false,
+  CONNECTION_TIMEOUT: 30000,
+  SOCKET_TIMEOUT: 60000,
+  GREETING_TIMEOUT: 30000,
+  MAX_RETRIES: 3,
+  RETRY_DELAY_MS: 2000
+};
+
+/**
+ * Create a reusable transporter object using SMTP transport
+ * with connection pooling and retry logic for Brevo
+ */
 const createTransporter = () => {
-  // Configure SMTP settings from environment variables
-  // Supports Gmail, Outlook, Yahoo, Brevo, or any SMTP service
-  const port = parseInt(process.env.SMTP_PORT) || 587;
-  const isSecure = process.env.SMTP_SECURE === 'true' || port === 465;
-  
-  // Brevo SMTP configuration
-  const isBrevo = process.env.SMTP_HOST && process.env.SMTP_HOST.includes('brevo.com');
-  
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: port,
-    secure: isSecure, // true for 465, false for other ports (STARTTLS)
+    host: BREVO_CONFIG.HOST,
+    port: BREVO_CONFIG.PORT,
+    secure: BREVO_CONFIG.SECURE,
     auth: {
       user: process.env.SMTP_USER || '',
       pass: process.env.SMTP_PASS || ''
     },
-    // Connection timeout settings
-    connectionTimeout: 30000, // 30 seconds (increased for reliability)
-    socketTimeout: 30000, // 30 seconds
-    greetingTimeout: 30000, // 30 seconds
-    // TLS configuration - optimized for Brevo and modern SMTP servers
+    connectionTimeout: BREVO_CONFIG.CONNECTION_TIMEOUT,
+    socketTimeout: BREVO_CONFIG.SOCKET_TIMEOUT,
+    greetingTimeout: BREVO_CONFIG.GREETING_TIMEOUT,
     tls: {
-      // Don't reject self-signed certificates (useful for some SMTP servers)
-      rejectUnauthorized: false,
-      // Use modern TLS cipher suites (remove outdated SSLv3)
-      minVersion: 'TLSv1.2',
-      // For Brevo, we don't need to specify ciphers - let Node.js negotiate
-      ...(isBrevo ? {
-        // Brevo-specific TLS settings
-        ciphers: undefined // Let Node.js choose appropriate ciphers
-      } : {
-        // For other providers, use default TLS settings
-        ciphers: undefined
-      })
+      rejectUnauthorized: process.env.NODE_ENV === 'production', // Only verify certs in production
+      minVersion: 'TLSv1.2'
     },
-    // Retry configuration
-    pool: false,
-    maxConnections: 1,
-    maxMessages: 3,
-    // Debug mode (set to true for troubleshooting)
-    debug: process.env.SMTP_DEBUG === 'true',
-    logger: process.env.SMTP_DEBUG === 'true'
+    pool: true, // Enable connection pooling
+    maxConnections: 5,
+    maxMessages: 100,
+    dnsTimeout: 10000,
+    logger: process.env.NODE_ENV !== 'production',
+    debug: process.env.NODE_ENV !== 'production'
   });
 };
 
-// Send verification code email
-const sendVerificationEmail = async (email, verificationCode, userName) => {
-  try {
-    // Validate SMTP configuration
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      throw new Error('SMTP credentials not configured. Please set SMTP_USER and SMTP_PASS in .env file');
+/**
+ * Helper function to retry failed operations
+ */
+async function withRetry(operation, maxAttempts = BREVO_CONFIG.MAX_RETRIES) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      console.warn(`Attempt ${attempt} failed: ${error.message}`);
+      
+      if (attempt < maxAttempts) {
+        const delay = BREVO_CONFIG.RETRY_DELAY_MS * attempt;
+        console.log(`Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
+  }
+  
+  throw lastError;
+}
 
-    const transporter = createTransporter();
+/**
+ * Send verification code email with retry logic and Brevo optimizations
+ */
+const sendVerificationEmail = async (email, verificationCode, userName) => {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error('SMTP credentials not configured. Please set SMTP_USER and SMTP_PASS in .env file');
+  }
 
-    // Verify transporter configuration
-    await transporter.verify();
+  const transporter = createTransporter();
+  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const verificationLink = `${process.env.FRONTEND_URL || 'https://your-frontend-url.com'}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
 
-    // For Brevo, you can use a separate FROM_EMAIL env variable
-    // Otherwise, use SMTP_USER (which should be your verified sender email for Brevo)
-    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-    
-    const mailOptions = {
+  const mailOptions = {
       from: `"PharmaCare" <${fromEmail}>`,
       to: email,
       subject: 'Email Verification Code - PharmaCare',
+      headers: {
+        'X-SMTPAPI': JSON.stringify({
+          category: ['verification'],
+          'send_at': Math.floor(Date.now() / 1000) + 5 // Send after 5 seconds
+        }),
+        'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}?subject=Unsubscribe_Verification>`,
+        'X-Auto-Response-Suppress': 'OOF, AutoReply',
+        'Precedence': 'bulk'
       html: `
         <!DOCTYPE html>
         <html>
@@ -114,53 +134,103 @@ const sendVerificationEmail = async (email, verificationCode, userName) => {
       `
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Verification email sent successfully to:', email);
-    console.log('   Message ID:', info.messageId);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    console.error('❌ Error sending verification email:', error.message);
-    console.error('   Error details:', {
-      code: error.code,
-      command: error.command,
-      response: error.response,
-      responseCode: error.responseCode
+    // Wrap the send operation with retry logic
+    return withRetry(async () => {
+      // Verify connection before sending
+      await transporter.verify();
+      
+      const info = await transporter.sendMail(mailOptions);
+      
+      console.log('✅ Verification email sent successfully to:', email);
+      console.log('   Message ID:', info.messageId);
+      console.log('   Envelope:', info.envelope);
+      
+      return { 
+        success: true, 
+        messageId: info.messageId,
+        envelope: info.envelope,
+        accepted: info.accepted,
+        rejected: info.rejected,
+        pending: info.pending,
+        response: info.response
+      };
+    }).catch(error => {
+      console.error('❌ Failed to send verification email after retries:', error.message);
+      
+      // Enhanced error details for debugging
+      const errorDetails = {
+        name: error.name,
+        code: error.code,
+        command: error.command,
+        response: error.response,
+        responseCode: error.responseCode,
+        stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+      };
+      
+      console.error('   Error details:', JSON.stringify(errorDetails, null, 2));
+      
+      // Throw a more descriptive error based on the error code
+      let errorMessage = 'Failed to send verification email';
+      
+      switch (error.code) {
+        case 'EAUTH':
+          errorMessage = 'SMTP authentication failed. Please check your SMTP credentials.';
+          if (process.env.NODE_ENV !== 'production') {
+            errorMessage += ` (Using SMTP_USER: ${process.env.SMTP_USER ? 'set' : 'not set'})`;
+          }
+          break;
+          
+        case 'ECONNECTION':
+          errorMessage = `Cannot connect to SMTP server at ${BREVO_CONFIG.HOST}:${BREVO_CONFIG.PORT}. ` +
+                        'Please check your network connection and SMTP settings.';
+          break;
+          
+        case 'ETIMEDOUT':
+          errorMessage = 'SMTP connection timed out. The server took too long to respond.';
+          break;
+          
+        case 'EENVELOPE':
+          errorMessage = 'Invalid email envelope. Please check the recipient email address.';
+          break;
+          
+        default:
+          if (error.response) {
+            errorMessage += `: ${error.response}`;
+          } else {
+            errorMessage += `: ${error.message}`;
+          }
+      }
+      
+      const enhancedError = new Error(errorMessage);
+      enhancedError.details = errorDetails;
+      throw enhancedError;
     });
-    
-    // Provide more helpful error messages
-    if (error.code === 'EAUTH') {
-      throw new Error('SMTP authentication failed. Please check your SMTP_USER and SMTP_PASS credentials.');
-    } else if (error.code === 'ECONNECTION') {
-      throw new Error(`Failed to connect to SMTP server at ${process.env.SMTP_HOST}:${process.env.SMTP_PORT}. Please check your SMTP_HOST and SMTP_PORT settings.`);
-    } else if (error.code === 'ETIMEDOUT') {
-      throw new Error('SMTP connection timed out. Please check your network connection and SMTP server settings.');
-    }
-    
-    throw new Error(`Failed to send verification email: ${error.message}`);
-  }
 };
 
-// Send password reset email with temporary password
+/**
+ * Send password reset email with retry logic and Brevo optimizations
+ */
 const sendPasswordResetEmail = async (email, temporaryPassword, userName) => {
-  try {
-    // Validate SMTP configuration
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      throw new Error('SMTP credentials not configured. Please set SMTP_USER and SMTP_PASS in .env file');
-    }
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error('SMTP credentials not configured. Please set SMTP_USER and SMTP_PASS in .env file');
+  }
 
-    const transporter = createTransporter();
+  const transporter = createTransporter();
+  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const resetLink = `${process.env.FRONTEND_URL || 'https://your-frontend-url.com'}/reset-password?token=${temporaryPassword}&email=${encodeURIComponent(email)}`;
 
-    // Verify transporter configuration
-    await transporter.verify();
-
-    // For Brevo, you can use a separate FROM_EMAIL env variable
-    // Otherwise, use SMTP_USER (which should be your verified sender email for Brevo)
-    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-    
-    const mailOptions = {
+  const mailOptions = {
       from: `"PharmaCare" <${fromEmail}>`,
       to: email,
       subject: 'Password Reset - PharmaCare',
+      headers: {
+        'X-SMTPAPI': JSON.stringify({
+          category: ['password_reset'],
+          'send_at': Math.floor(Date.now() / 1000) + 5 // Send after 5 seconds
+        }),
+        'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}?subject=Unsubscribe_Password_Reset>`,
+        'X-Auto-Response-Suppress': 'OOF, AutoReply',
+        'Precedence': 'bulk'
       html: `
         <!DOCTYPE html>
         <html>
@@ -219,37 +289,77 @@ const sendPasswordResetEmail = async (email, temporaryPassword, userName) => {
       `
     };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Password reset email sent successfully to:', email);
-    console.log('   Message ID:', info.messageId);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    console.error('❌ Error sending password reset email:', error.message);
-    console.error('   Error details:', {
-      code: error.code,
-      command: error.command,
-      response: error.response,
-      responseCode: error.responseCode
+    // Wrap the send operation with retry logic
+    return withRetry(async () => {
+      // Verify connection before sending
+      await transporter.verify();
+      
+      const info = await transporter.sendMail(mailOptions);
+      
+      console.log('✅ Password reset email sent successfully to:', email);
+      console.log('   Message ID:', info.messageId);
+      console.log('   Envelope:', info.envelope);
+      
+      return { 
+        success: true, 
+        messageId: info.messageId,
+        envelope: info.envelope,
+        accepted: info.accepted,
+        rejected: info.rejected,
+        pending: info.pending,
+        response: info.response
+      };
+    }).catch(error => {
+      console.error('❌ Failed to send password reset email after retries:', error.message);
+      
+      // Enhanced error details for debugging
+      const errorDetails = {
+        name: error.name,
+        code: error.code,
+        command: error.command,
+        response: error.response,
+        responseCode: error.responseCode,
+        stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+      };
+      
+      console.error('   Error details:', JSON.stringify(errorDetails, null, 2));
+      
+      // Throw a more descriptive error based on the error code
+      let errorMessage = 'Failed to send password reset email';
+      
+      switch (error.code) {
+        case 'EAUTH':
+          errorMessage = 'SMTP authentication failed. Please check your SMTP credentials.';
+          if (process.env.NODE_ENV !== 'production') {
+            errorMessage += ` (Using SMTP_USER: ${process.env.SMTP_USER ? 'set' : 'not set'})`;
+          }
+          break;
+          
+        case 'ECONNECTION':
+          errorMessage = `Cannot connect to SMTP server at ${BREVO_CONFIG.HOST}:${BREVO_CONFIG.PORT}. ` +
+                        'Please check your network connection and SMTP settings.';
+          break;
+          
+        case 'ETIMEDOUT':
+          errorMessage = 'SMTP connection timed out. The server took too long to respond.';
+          break;
+          
+        case 'EENVELOPE':
+          errorMessage = 'Invalid email envelope. Please check the recipient email address.';
+          break;
+          
+        default:
+          if (error.response) {
+            errorMessage += `: ${error.response}`;
+          } else {
+            errorMessage += `: ${error.message}`;
+          }
+      }
+      
+      const enhancedError = new Error(errorMessage);
+      enhancedError.details = errorDetails;
+      throw enhancedError;
     });
-    
-    // Provide more helpful error messages
-    if (error.code === 'EAUTH') {
-      throw new Error('SMTP authentication failed. Please check your SMTP_USER and SMTP_PASS credentials.');
-    } else if (error.code === 'ECONNECTION') {
-      throw new Error(`Failed to connect to SMTP server at ${process.env.SMTP_HOST}:${process.env.SMTP_PORT}. Please check your SMTP_HOST and SMTP_PORT settings.`);
-    } else if (error.code === 'ETIMEDOUT') {
-      throw new Error('SMTP connection timed out. Please check your network connection and SMTP server settings.');
-    }
-    
-    // Re-throw with more context
-    const errorMessage = error.message || 'Unknown error occurred';
-    const enhancedError = new Error(`Failed to send password reset email: ${errorMessage}`);
-    enhancedError.code = error.code;
-    enhancedError.command = error.command;
-    enhancedError.response = error.response;
-    enhancedError.responseCode = error.responseCode;
-    throw enhancedError;
-  }
 };
 
 module.exports = {

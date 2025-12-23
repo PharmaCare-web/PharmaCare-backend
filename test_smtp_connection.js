@@ -18,35 +18,28 @@ if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
   process.exit(1);
 }
 
-const port = parseInt(process.env.SMTP_PORT) || 587;
+const port = parseInt(process.env.SMTP_PORT, 10) || 587;
 const isSecure = process.env.SMTP_SECURE === 'true' || port === 465;
+const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
 
-// Check if using Brevo
-const isBrevo = process.env.SMTP_HOST && process.env.SMTP_HOST.includes('brevo.com');
+console.log(`\n🔌 Attempting connection to ${host}:${port}...`);
 
-console.log(`\n🔌 Attempting connection to ${process.env.SMTP_HOST}:${port}...`);
-if (isBrevo) {
-  console.log('   Detected Brevo SMTP configuration');
-}
-
-// Create transporter with timeout settings (optimized for Brevo)
+// Create transporter with timeout settings (Brevo‑friendly)
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: port,
+  host,
+  port,
   secure: isSecure,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
   },
-  connectionTimeout: 30000, // 30 seconds (increased for reliability)
+  connectionTimeout: 30000,
   socketTimeout: 30000,
   greetingTimeout: 30000,
   tls: {
     rejectUnauthorized: false,
-    minVersion: 'TLSv1.2' // Use modern TLS, not outdated SSLv3
-  },
-  debug: true, // Enable debug for testing
-  logger: true
+    minVersion: 'TLSv1.2'
+  }
 });
 
 // Test connection
@@ -73,17 +66,10 @@ transporter.verify(function (error, success) {
       console.log('   5. Check if your ISP is blocking SMTP ports');
       console.log('   6. Try using a VPN if you\'re on a restricted network');
     } else if (error.code === 'EAUTH') {
-      if (isBrevo) {
-        console.log('\n   For Brevo SMTP:');
-        console.log('   1. SMTP_USER should be your SMTP login (e.g., 9e7d74001@smtp-brevo.com)');
-        console.log('   2. SMTP_PASS should be your SMTP API key/password');
-        console.log('   3. Verify your credentials in Brevo dashboard');
-        console.log('   4. Make sure your sender email is verified in Brevo');
-      } else {
-        console.log('\n   1. Verify SMTP_USER is your full email address');
-        console.log('   2. For Gmail, use App Password (not regular password)');
-        console.log('   3. Get App Password: https://myaccount.google.com/apppasswords');
-      }
+      console.log('\n   Authentication failed.');
+      console.log('   For Brevo:');
+      console.log('     - SMTP_USER should be your Brevo SMTP login (e.g. 9e7d74001@smtp-brevo.com)');
+      console.log('     - SMTP_PASS should be your Brevo SMTP key (from SMTP & API settings)');
     } else {
       console.log('\n   1. Check your SMTP settings in .env file');
       console.log('   2. Verify your email provider\'s SMTP settings');
