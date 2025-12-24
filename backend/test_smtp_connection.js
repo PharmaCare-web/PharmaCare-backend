@@ -8,7 +8,7 @@ console.log('='.repeat(60));
 
 // Check environment variables
 console.log('\n📋 Configuration:');
-console.log(`   SMTP_HOST: ${process.env.SMTP_HOST || 'smtp.gmail.com'}`);
+console.log(`   SMTP_HOST: ${process.env.SMTP_HOST || 'smtp-relay.brevo.com'}`);
 console.log(`   SMTP_PORT: ${process.env.SMTP_PORT || '587'}`);
 console.log(`   SMTP_SECURE: ${process.env.SMTP_SECURE || 'false'}`);
 console.log(`   SMTP_USER: ${process.env.SMTP_USER || 'NOT SET'}`);
@@ -18,26 +18,27 @@ if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
   process.exit(1);
 }
 
-const port = parseInt(process.env.SMTP_PORT) || 587;
+const port = parseInt(process.env.SMTP_PORT, 10) || 587;
 const isSecure = process.env.SMTP_SECURE === 'true' || port === 465;
+const host = process.env.SMTP_HOST || 'smtp-relay.brevo.com';
 
-console.log(`\n🔌 Attempting connection to ${process.env.SMTP_HOST}:${port}...`);
+console.log(`\n🔌 Attempting connection to ${host}:${port}...`);
 
-// Create transporter with timeout settings
+// Create transporter with timeout settings (Brevo‑friendly)
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: port,
+  host,
+  port,
   secure: isSecure,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
   },
-  connectionTimeout: 10000, // 10 seconds
-  socketTimeout: 10000,
-  greetingTimeout: 10000,
+  connectionTimeout: 30000,
+  socketTimeout: 30000,
+  greetingTimeout: 30000,
   tls: {
     rejectUnauthorized: false,
-    ciphers: 'SSLv3'
+    minVersion: 'TLSv1.2'
   }
 });
 
@@ -65,9 +66,10 @@ transporter.verify(function (error, success) {
       console.log('   5. Check if your ISP is blocking SMTP ports');
       console.log('   6. Try using a VPN if you\'re on a restricted network');
     } else if (error.code === 'EAUTH') {
-      console.log('\n   1. Verify SMTP_USER is your full email address');
-      console.log('   2. For Gmail, use App Password (not regular password)');
-      console.log('   3. Get App Password: https://myaccount.google.com/apppasswords');
+      console.log('\n   Authentication failed.');
+      console.log('   For Brevo:');
+      console.log('     - SMTP_USER should be your Brevo SMTP login (e.g. 9e7d74001@smtp-brevo.com)');
+      console.log('     - SMTP_PASS should be your Brevo SMTP key (from SMTP & API settings)');
     } else {
       console.log('\n   1. Check your SMTP settings in .env file');
       console.log('   2. Verify your email provider\'s SMTP settings');

@@ -30,13 +30,13 @@ console.log('\n📧 Email Settings:');
 if (process.env.SMTP_USER && process.env.SMTP_PASS) {
   console.log(`   SMTP_USER: ${process.env.SMTP_USER}`);
   console.log(`   SMTP_PASS: ***SET***`);
-  console.log(`   SMTP_HOST: ${process.env.SMTP_HOST || 'smtp.gmail.com'}`);
+  console.log(`   SMTP_HOST: ${process.env.SMTP_HOST || 'smtp-relay.brevo.com'}`);
   console.log(`   SMTP_PORT: ${process.env.SMTP_PORT || '587'}`);
   
   // Check for placeholder
-  if (process.env.SMTP_USER.includes('your-email') || process.env.SMTP_USER.includes('your-actual-email')) {
+  if (process.env.SMTP_USER.includes('your-email') || process.env.SMTP_USER.includes('your-actual-email') || process.env.SMTP_USER.includes('your-brevo')) {
     console.log('\n   ⚠️  WARNING: SMTP_USER contains placeholder!');
-    console.log('   Replace with your actual Gmail address');
+    console.log('   Replace with your actual Brevo SMTP username');
     allGood = false;
   } else {
     console.log('   ✅ Email configuration looks good!');
@@ -64,10 +64,10 @@ PORT=5000
 FRONTEND_URL=http://localhost:3000
 JWT_SECRET=your-secret-key-here
 JWT_EXPIRE=7d
-SMTP_HOST=smtp.gmail.com
+SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_USER=your-actual-email@gmail.com
-SMTP_PASS=vfnq xyqn hwbw scyi
+SMTP_USER=your-brevo-smtp-username
+SMTP_PASS=your-brevo-smtp-password
 `);
 

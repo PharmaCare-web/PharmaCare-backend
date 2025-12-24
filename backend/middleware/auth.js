@@ -29,7 +29,7 @@ const authMiddleware = async (req, res, next) => {
       `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
               u.is_active, u.must_change_password, u.is_temporary_password,
               r.role_name, b.branch_name 
-       FROM users u 
+       FROM "user" u 
        LEFT JOIN role r ON u.role_id = r.role_id 
        LEFT JOIN branch b ON u.branch_id = b.branch_id 
        WHERE u.user_id = ? AND u.is_active = TRUE`,

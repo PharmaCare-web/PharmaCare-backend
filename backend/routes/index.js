@@ -11,11 +11,13 @@ const managerStaffController = require('../controllers/managerStaffController');
 const managerMedicineController = require('../controllers/managerMedicineController');
 const medicineController = require('../controllers/medicineController');
 const pharmacistController = require('../controllers/pharmacistController');
+const cashierController = require('../controllers/cashierController');
 const authRoutes = require('./authRoutes');
 const authMiddleware = require('../middleware/auth');
 const adminAuth = require('../middleware/adminAuth');
 const managerAuth = require('../middleware/managerAuth');
 const pharmacistAuth = require('../middleware/pharmacistAuth');
+const cashierAuth = require('../middleware/cashierAuth');
 const requirePasswordChange = require('../middleware/requirePasswordChange');
 
 // Authentication routes
@@ -86,6 +88,25 @@ router.get('/pharmacist/sales/:sale_id', authMiddleware, requirePasswordChange, 
 router.get('/pharmacist/reports/low-stock', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getLowStockReport);
 router.get('/pharmacist/reports/expiry', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getExpiryReport);
 router.get('/pharmacist/reports/inventory-summary', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getInventorySummary);
+
+// ============================================================================
+// CASHIER ROUTES (Cashier only - payment acceptance, receipts, returns, reports)
+// ============================================================================
+
+// 1. Payment Management
+router.get('/cashier/payments/pending', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getPendingPayments);
+router.get('/cashier/payments/:sale_id', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getPaymentRequestDetails);
+router.post('/cashier/payments/:sale_id/accept', authMiddleware, requirePasswordChange, cashierAuth, cashierController.acceptPayment);
+router.get('/cashier/receipts/:sale_id', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getReceipt);
+
+// 2. Payment Reports
+router.get('/cashier/reports/payments', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getPaymentReports);
+
+// 3. Return Management
+router.get('/cashier/returns/sales', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getSalesForReturn);
+router.get('/cashier/returns/sales/:sale_id/items', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getSaleItemsForReturn);
+router.post('/cashier/returns', authMiddleware, requirePasswordChange, cashierAuth, cashierController.processReturn);
+router.get('/cashier/reports/returns', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getReturnReports);
 
 // Protected user routes (require authentication)
 router.get('/users', authMiddleware, userController.getAllUsers);

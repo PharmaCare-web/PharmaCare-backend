@@ -32,22 +32,47 @@ const errorHandler = (err, req, res, next) => {
     });
   }
 
-  // MySQL errors
-  if (err.code && err.code.startsWith('ER_')) {
-    console.error('MySQL Error:', err.code, err.message);
-    console.error('SQL Message:', err.sqlMessage);
+  // PostgreSQL errors
+  if (err.code && (err.code.startsWith('ER_') || err.code.startsWith('23') || err.code.startsWith('42'))) {
+    console.error('Database Error:', err.code, err.message);
     
     // Provide more helpful error messages
     let errorMessage = 'Database error occurred';
-    if (err.code === 'ER_BAD_FIELD_ERROR') {
-      errorMessage = 'Database schema error. Please run the database migration.';
-    } else if (err.code === 'ER_DUP_ENTRY') {
+    let statusCode = 500;
+    
+    // PostgreSQL unique violation (duplicate entry)
+    if (err.code === '23505' || err.code === 'ER_DUP_ENTRY') {
       errorMessage = 'Duplicate entry. This email may already be registered.';
-    } else if (err.sqlMessage) {
-      errorMessage = err.sqlMessage;
+      statusCode = 409;
+    }
+    // PostgreSQL foreign key violation
+    else if (err.code === '23503') {
+      errorMessage = 'Referenced record does not exist.';
+      statusCode = 400;
+    }
+    // PostgreSQL not null violation
+    else if (err.code === '23502') {
+      errorMessage = 'Required field is missing.';
+      statusCode = 400;
+    }
+    // PostgreSQL invalid input syntax
+    else if (err.code === '22P02' || err.code === 'ER_BAD_FIELD_ERROR') {
+      errorMessage = 'Invalid input data.';
+      statusCode = 400;
+    }
+    // Database schema errors
+    else if (err.code === '42P01' || err.code === 'ER_BAD_FIELD_ERROR') {
+      errorMessage = 'Database schema error. Please run the database migration.';
+      statusCode = 500;
+    }
+    else if (err.detail) {
+      errorMessage = err.detail;
+    }
+    else if (err.message) {
+      errorMessage = err.message;
     }
     
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
       message: errorMessage,
       errorCode: err.code

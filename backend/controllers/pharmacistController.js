@@ -227,10 +227,10 @@ const createSale = async (req, res, next) => {
         totalAmount += medicine[0].price * quantity;
       }
 
-      // Create sale record
+      // Create sale record with pending_payment status (cashier will accept payment)
       const [saleResult] = await connection.execute(
         `INSERT INTO sale (branch_id, user_id, total_amount, status, sale_date)
-         VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP) RETURNING sale_id`,
+         VALUES (?, ?, ?, 'pending_payment', CURRENT_TIMESTAMP) RETURNING sale_id`,
         [branchId, usersId, totalAmount]
       );
 
@@ -265,12 +265,8 @@ const createSale = async (req, res, next) => {
         );
       }
 
-      // Create payment record
-      await connection.execute(
-        `INSERT INTO payment (sale_id, payment_type, amount, payment_date)
-         VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
-        [saleId, payment_type, totalAmount]
-      );
+      // Payment record will be created by cashier when accepting payment
+      // Don't create payment here - cashier will handle it
 
       await connection.commit();
 
@@ -281,11 +277,11 @@ const createSale = async (req, res, next) => {
           s.sale_date,
           s.total_amount,
           s.status,
-          u.full_name as cashier_name,
+          u.full_name as pharmacist_name,
           p.payment_type,
           p.amount as payment_amount
         FROM sale s
-        LEFT JOIN users u ON s.user_id = u.user_id
+        LEFT JOIN "user" u ON s.user_id = u.user_id
         LEFT JOIN payment p ON s.sale_id = p.sale_id
         WHERE s.sale_id = ?`,
         [saleId]
@@ -309,11 +305,12 @@ const createSale = async (req, res, next) => {
 
       res.status(201).json({
         success: true,
-        message: 'Sale created successfully',
+        message: 'Sale created successfully. Payment pending cashier approval.',
         data: {
           sale: saleDetails[0],
           items: saleItems,
-          receipt_number: `REC-${saleId.toString().padStart(6, '0')}`
+          status: 'pending_payment',
+          note: 'Payment will be processed by cashier'
         }
       });
     } catch (error) {

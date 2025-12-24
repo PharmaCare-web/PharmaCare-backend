@@ -13,10 +13,33 @@ services:
           type: web
           name: pharmacare-backend
           property: port
-    # Database will be configured separately in Render dashboard
-    # Add these environment variables in Render dashboard:
-    # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
-    # JWT_SECRET, JWT_EXPIRE
-    # SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS
-    # FRONTEND_URL
+    # ============================================================================
+    # REQUIRED ENVIRONMENT VARIABLES - Configure in Render Dashboard
+    # ============================================================================
+    # 
+    # Database Configuration (PostgreSQL):
+    #   DB_HOST=your-database-host.render.com
+    #   DB_PORT=5432
+    #   DB_USER=your-db-user
+    #   DB_PASSWORD=your-db-password
+    #   DB_NAME=pharmacare
+    #   DB_SSL=true (required for Render PostgreSQL)
+    #
+    # JWT Configuration:
+    #   JWT_SECRET=your-strong-random-secret-key (generate a secure random string)
+    #   JWT_EXPIRE=7d
+    #
+    # Email Configuration (Brevo SMTP):
+    #   SMTP_HOST=smtp-relay.brevo.com
+    #   SMTP_PORT=587
+    #   SMTP_SECURE=false
+    #   SMTP_USER=your-brevo-smtp-username@smtp-brevo.com
+    #   SMTP_PASS=your-brevo-smtp-key
+    #   SMTP_FROM_EMAIL=optional-custom-from-email@yourdomain.com
+    #
+    # Frontend URL (REQUIRED for CORS in production):
+    #   FRONTEND_URL=https://your-frontend-domain.com
+    #   (Can be comma-separated for multiple origins: https://app1.com,https://app2.com)
+    #
+    # ============================================================================
 

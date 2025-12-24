@@ -13,10 +13,14 @@ const required = (key) => {
 const isProd = process.env.NODE_ENV === 'production';
 const host = isProd ? required('DB_HOST') : process.env.DB_HOST || 'localhost';
 const port = parseInt(process.env.DB_PORT || '5432', 10);
-const user = process.env.DB_USER || 'postgres';
-const password = process.env.DB_PASSWORD || '';
-const database = process.env.DB_NAME || 'pharmacare';
-const useSSL = (process.env.DB_SSL || '').toLowerCase() === 'true';
+const user = isProd ? required('DB_USER') : (process.env.DB_USER || 'postgres');
+const password = isProd ? required('DB_PASSWORD') : (process.env.DB_PASSWORD || '');
+const database = isProd ? required('DB_NAME') : (process.env.DB_NAME || 'pharmacare');
+// In production, default to SSL enabled unless explicitly disabled
+// In development, default to SSL disabled unless explicitly enabled
+const useSSL = isProd 
+  ? (process.env.DB_SSL || '').toLowerCase() !== 'false'
+  : (process.env.DB_SSL || '').toLowerCase() === 'true';
 
 console.log('🛠️ Database config:');
 console.log(`   host: ${host}`);
@@ -84,6 +88,43 @@ pool.execute = async (query, params = []) => {
 
   const result = await originalQuery(pgQuery, pgParams);
   return [result.rows, result.fields || []];
+};
+
+// MySQL-compatible getConnection wrapper for transactions
+pool.getConnection = async () => {
+  const client = await pool.connect();
+  
+  // Add MySQL-compatible execute method
+  client.execute = async (query, params = []) => {
+    let pgQuery = query;
+    let paramIndex = 1;
+    const pgParams = [];
+
+    pgQuery = pgQuery.replace(/\?/g, () => {
+      if (paramIndex - 1 < params.length) {
+        pgParams.push(params[paramIndex - 1]);
+      }
+      return `$${paramIndex++}`;
+    });
+
+    const result = await client.query(pgQuery, pgParams);
+    return [result.rows, result.fields || []];
+  };
+
+  // Add MySQL-compatible transaction methods
+  client.beginTransaction = async () => {
+    await client.query('BEGIN');
+  };
+
+  client.commit = async () => {
+    await client.query('COMMIT');
+  };
+
+  client.rollback = async () => {
+    await client.query('ROLLBACK');
+  };
+
+  return client;
 };
 
 module.exports = pool;
