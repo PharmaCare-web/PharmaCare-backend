@@ -89,7 +89,6 @@ const sendVerificationEmail = async (email, verificationCode, userName) => {
         'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}?subject=Unsubscribe_Verification>`,
         'X-Auto-Response-Suppress': 'OOF, AutoReply',
         'Precedence': 'bulk'
-      },
       html: `
         <!DOCTYPE html>
         <html>
@@ -232,7 +231,6 @@ const sendPasswordResetEmail = async (email, temporaryPassword, userName) => {
         'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}?subject=Unsubscribe_Password_Reset>`,
         'X-Auto-Response-Suppress': 'OOF, AutoReply',
         'Precedence': 'bulk'
-      },
       html: `
         <!DOCTYPE html>
         <html>
