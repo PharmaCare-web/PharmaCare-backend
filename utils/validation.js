@@ -1,7 +1,7 @@
 // Validation utilities for authentication
 
-const validateRegister = async(req, res, next) => {
-  const { full_name, email, password, role_id, branch_id, branch_name } = req.body;
+const validateRegister = (req, res, next) => {
+  const { full_name, email, password, role_id, branch_id } = req.body;
   const errors = [];
 
   // Validate full_name
@@ -32,26 +32,12 @@ const validateRegister = async(req, res, next) => {
   // Validate branch_id
   // Admin (role_id = 1) does not require branch_id (system role, not branch-specific)
   // Pharmacy roles (Manager=2, Pharmacist=3, Cashier=4) require branch_id
- if (parseInt(role_id) === 2) { // Manager
-  if (branch_id && branch_name) {
-    // Joining branch
-    const branch = await Branch.findById(branch_id);
-    if (!branch) {
-      errors.push('Branch ID does not exist');
-    } else if (branch.name !== branch_name) {
-      errors.push('Branch name does not match the branch ID');
+  if (role_id && parseInt(role_id) !== 1) {
+    // For non-Admin roles, branch_id is required
+    if (!branch_id || isNaN(branch_id)) {
+      errors.push('Valid branch_id is required for pharmacy roles (Manager, Pharmacist, Cashier)');
     }
-  } else if (!branch_id && branch_name) {
-    // Creating new branch
-    const branchExists = await Branch.findOne({ name: branch_name });
-    if (branchExists) {
-      errors.push('Branch name already exists');
-    }
-  } else {
-    errors.push('To join a branch, provide both branch ID and branch name; to create a branch, provide branch name only.');
   }
-}
-
   // For Admin role, branch_id should be null or not provided
 
   if (errors.length > 0) {
