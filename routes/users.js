@@ -1,7 +1,9 @@
 // src/routes/users.js
 const express = require('express');
 const router = express.Router(); // <-- THIS IS REQUIRED
-const db = require('../db'); // your database connection
+const db = require('../config/database');
+// correct path
+ // your database connection
 
 // Temporary route: delete all non-admin users
 router.delete('/delete-all-users-temp', (req, res) => {
