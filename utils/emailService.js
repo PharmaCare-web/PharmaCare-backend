@@ -3,8 +3,8 @@ const nodemailer = require('nodemailer');
 // Constants for Brevo SMTP configuration
 const BREVO_CONFIG = {
   HOST: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
-  PORT: parseInt(process.env.SMTP_PORT, 10) || 587,
-  SECURE: process.env.SMTP_SECURE === 'false' || false,
+  PORT: parseInt(process.env.SMTP_PORT, 10) || 465,
+  SECURE: process.env.SMTP_SECURE === 'true',
   CONNECTION_TIMEOUT: 30000,
   SOCKET_TIMEOUT: 60000,
   GREETING_TIMEOUT: 30000,
@@ -74,7 +74,8 @@ const sendVerificationEmail = async (email, verificationCode, userName) => {
   }
 
   const transporter = createTransporter();
-  const fromEmail = process.env.SMTP_FROM_EMAIL;
+  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+
 
         if (!fromEmail) {
           throw new Error('SMTP_FROM_EMAIL is not set in your .env file');
