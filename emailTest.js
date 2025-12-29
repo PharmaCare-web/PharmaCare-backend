@@ -30,8 +30,8 @@ async function testEmail() {
       // Send test email
       let info = await transporter.sendMail({
         from: `"Test Sender" <${process.env.SMTP_USER}>`,
-        to: 'YOUR_EMAIL_HERE', // replace with your email
-        subject: 'Test Email from Brevo SMTP',
+        to: 'dagnmawitadeferes@gmail.com'
+,       subject: 'Test Email from Brevo SMTP',
         text: 'This is a test email to verify SMTP configuration.',
         html: '<b>This is a test email to verify SMTP configuration.</b>'
       });
