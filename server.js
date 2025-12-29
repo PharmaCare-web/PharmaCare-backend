@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
+
 const routes = require('./routes/index');
 const userRoutes = require('./routes/users'); // add this line with your users.js
 
@@ -85,8 +86,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
 
 // Your other middleware like CORS and static files are already here
 

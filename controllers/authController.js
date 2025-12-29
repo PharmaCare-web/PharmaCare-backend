@@ -49,59 +49,63 @@ const register = async (req, res, next) => {
 
     let finalBranchId = null;
 
-// Manager can create new branch OR join existing branch OR use existing branch without branch_name
-if (branch_name) {
-    if (!location) {
+    // Manager can create new branch OR join existing branch
+    if (branch_name) {
+      // Manager is creating a new branch
+      if (!location) {
         return res.status(400).json({
-            success: false,
-            message: 'location is required when creating a new branch'
+          success: false,
+          message: 'location is required when creating a new branch'
         });
-    }
+      }
 
-    // Check if branch name already exists
-    const [existingBranches] = await pool.execute(
+      // Get default pharmacy_id (first pharmacy)
+      const [pharmacies] = await pool.execute('SELECT pharmacy_id FROM pharmacy LIMIT 1');
+      if (pharmacies.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No pharmacy found. Please create a pharmacy first.'
+        });
+      }
+      const pharmacy_id = pharmacies[0].pharmacy_id;
+
+      // Check if branch name already exists
+      const [existingBranches] = await pool.execute(
         'SELECT branch_id FROM branch WHERE branch_name = ?',
         [branch_name]
-    );
+      );
 
-    if (existingBranches.length > 0) {
-        // If branch exists, just use it (optional: warn user)
-        finalBranchId = existingBranches[0].branch_id;
-    } else {
-        // Create new branch
-        const [pharmacies] = await pool.execute('SELECT pharmacy_id FROM pharmacy LIMIT 1');
-        if (pharmacies.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'No pharmacy found. Please create a pharmacy first.'
-            });
-        }
-        const pharmacy_id = pharmacies[0].pharmacy_id;
-
-        const [branchResult] = await pool.execute(
-            'INSERT INTO branch (pharmacy_id, branch_name, location) VALUES (?, ?, ?) RETURNING branch_id',
-            [pharmacy_id, branch_name, location]
-        );
-        finalBranchId = branchResult[0].branch_id || branchResult[0].id;
-    }
-} else if (branch_id) {
-    // Joining existing branch
-    const [branches] = await pool.execute('SELECT branch_id FROM branch WHERE branch_id = ?', [branch_id]);
-    if (branches.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Invalid branch_id'
+      if (existingBranches.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'Branch with this name already exists. Please use an existing branch or choose a different name.'
         });
-    }
-    finalBranchId = branch_id;
-} else {
-    // No branch provided at all — optional, but user must belong to some branch
-    return res.status(400).json({
-        success: false,
-        message: 'You must provide either branch_id or branch_name + location'
-    });
-}
+      }
 
+      // Create new branch (created_by will be set after users is created)
+      const [branchResult] = await pool.execute(
+        'INSERT INTO branch (pharmacy_id, branch_name, location) VALUES (?, ?, ?) RETURNING *',
+        [pharmacy_id, branch_name, location]
+      );
+      if (branchResult.length > 0) {
+        finalBranchId = branchResult[0].branch_id || branchResult[0].id;
+      }
+    } else if (branch_id) {
+      // Manager is joining an existing branch
+      const [branches] = await pool.execute('SELECT branch_id FROM branch WHERE branch_id = ?', [branch_id]);
+      if (branches.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid branch_id'
+        });
+      }
+      finalBranchId = branch_id;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Manager must either provide branch_name (to create new branch) or branch_id (to join existing branch)'
+      });
+    }
 
     // Hash password
     const saltRounds = 10;

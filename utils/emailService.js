@@ -75,6 +75,11 @@ const sendVerificationEmail = async (email, verificationCode, userName) => {
 
   const transporter = createTransporter();
   const fromEmail = process.env.SMTP_FROM_EMAIL;
+
+        if (!fromEmail) {
+          throw new Error('SMTP_FROM_EMAIL is not set in your .env file');
+        }
+
   const verificationLink = `${process.env.FRONTEND_URL || 'https://your-frontend-url.com'}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
 
   const mailOptions = {
