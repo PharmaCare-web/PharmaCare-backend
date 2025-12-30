@@ -204,7 +204,7 @@ const register = async (req, res, next) => {
     if (createdUserId && hasVerificationColumns) {
       try {
         // Only try to send email if SMTP is configured
-        if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+        if (process.env.BREVO_API_KEY) {
           await sendVerificationEmail(email, verificationCode, full_name);
           console.log(`✅ Verification code sent to ${email}`);
           emailSent = true;
@@ -593,7 +593,7 @@ const resendVerificationCode = async (req, res, next) => {
     );
 
     // Send verification email (only if SMTP is configured)
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    if (process.env.BREVO_API_KEY) {
       try {
         await sendVerificationEmail(email, verificationCode, users.full_name);
         console.log(`✅ Verification code resent to ${email}`);
@@ -687,7 +687,7 @@ const forgotPassword = async (req, res, next) => {
     };
 
     // Check if SMTP is configured before proceeding
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    if (!process.env.BREVO_API_KEY) {
       return res.status(503).json({
         success: false,
         message: 'Email service is not configured. Please contact administrator.',
