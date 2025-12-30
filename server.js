@@ -30,22 +30,17 @@ if (process.env.NODE_ENV === 'production') {
     : [];
   
   corsOptions.origin = (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.length === 0) {
-      console.warn('⚠️  No allowed origins configured. Rejecting CORS request.');
-      return callback(new Error('CORS: No allowed origins configured'));
-    }
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`⚠️  CORS blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  };
-} else {
+  if (!origin) return callback(null, true); // Postman, mobile apps
+
+  if (allowedOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+
+  console.warn(`❌ CORS blocked origin: ${origin}`);
+  return callback(null, false); // ← DO NOT throw error
+};
+}
+else {
   // In development, allow localhost and the configured FRONTEND_URL
   const devOrigins = [
     'http://localhost:3000',
