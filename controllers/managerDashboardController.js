@@ -185,7 +185,9 @@ const getDashboardSummary = async (req, res, next) => {
     res.json({
       success: true,
       data: {
+        branch_id: branch.branch_id, // Explicitly include branch_id at top level for easy access
         branchOverview: {
+          branch_id: branch.branch_id, // Include both formats for compatibility
           branchId: branch.branch_id,
           branchName: branch.branch_name,
           location: branch.location || null,
@@ -282,7 +284,8 @@ const getBranchOverview = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        branchId: branchInfo[0].branch_id,
+        branch_id: branchInfo[0].branch_id, // Explicitly include branch_id at top level
+        branchId: branchInfo[0].branch_id, // Keep camelCase for compatibility
         branchName: branchInfo[0].branch_name,
         location: branchInfo[0].location || null,
         email: branchInfo[0].email || null,

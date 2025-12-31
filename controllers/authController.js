@@ -52,6 +52,14 @@ const register = async (req, res, next) => {
     // Manager can create new branch OR join existing branch
     if (branch_name) {
       // Manager is creating a new branch
+      // branch_id is NOT required when creating a new branch
+      if (branch_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Do not provide branch_id when creating a new branch. Only provide branch_name and location.'
+        });
+      }
+
       if (!location) {
         return res.status(400).json({
           success: false,
@@ -78,7 +86,7 @@ const register = async (req, res, next) => {
       if (existingBranches.length > 0) {
         return res.status(409).json({
           success: false,
-          message: 'Branch with this name already exists. Please use an existing branch or choose a different name.'
+          message: 'Branch with this name already exists. Please use an existing branch (provide branch_id) or choose a different name.'
         });
       }
 
@@ -91,19 +99,36 @@ const register = async (req, res, next) => {
         finalBranchId = branchResult[0].branch_id || branchResult[0].id;
       }
     } else if (branch_id) {
-      // Manager is joining an existing branch
-      const [branches] = await pool.execute('SELECT branch_id FROM branch WHERE branch_id = ?', [branch_id]);
-      if (branches.length === 0) {
+      // Manager is joining an existing branch as a second/third manager
+      // branch_id IS REQUIRED when joining an existing branch
+      if (branch_name) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid branch_id'
+          message: 'Do not provide branch_name when joining an existing branch. Only provide branch_id.'
         });
       }
+
+      // Validate that the branch exists
+      const [branches] = await pool.execute(
+        'SELECT branch_id, branch_name FROM branch WHERE branch_id = ?',
+        [branch_id]
+      );
+      
+      if (branches.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: `Branch with ID ${branch_id} not found. Please provide a valid branch_id.`
+        });
+      }
+
+      // Branch exists - allow multiple managers per branch
       finalBranchId = branch_id;
+      console.log(`✅ Manager joining existing branch: branch_id=${branch_id}, branch_name=${branches[0].branch_name}`);
     } else {
+      // Neither branch_name nor branch_id provided
       return res.status(400).json({
         success: false,
-        message: 'Manager must either provide branch_name (to create new branch) or branch_id (to join existing branch)'
+        message: 'Manager registration requires either: (1) branch_name + location to create a new branch, OR (2) branch_id to join an existing branch as a second/third manager.'
       });
     }
 
@@ -224,8 +249,14 @@ const register = async (req, res, next) => {
     // Remove password and verification code from response
     const { password: _, verification_code: __, verification_code_expires: ___, ...usersWithoutPassword } = newUser;
 
-    // Custom message for managers
+    // Custom message for managers based on whether they created a branch or joined one
     let finalMessage = 'Manager account created successfully. Your account is pending admin activation. You will be notified once your account is activated.';
+    
+    if (branch_name) {
+      finalMessage = 'Manager account created successfully. New branch created. Your account is pending admin activation. You will be notified once your account is activated.';
+    } else if (branch_id) {
+      finalMessage = 'Manager account created successfully. You have joined an existing branch as a manager. Your account is pending admin activation. You will be notified once your account is activated.';
+    }
 
     res.status(201).json({
       success: true,
@@ -233,7 +264,8 @@ const register = async (req, res, next) => {
       users: usersWithoutPassword,
       requiresVerification: hasVerificationColumns && emailSent,
       requiresActivation: true,
-      isActive: false
+      isActive: false,
+      branchAction: branch_name ? 'created' : 'joined'
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -887,3 +919,4 @@ module.exports = {
   forgotPassword,
   changePassword
 };
+
