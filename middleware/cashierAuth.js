@@ -16,7 +16,7 @@ const cashierAuth = async (req, res, next) => {
     // Get user's role from database to ensure it's current
     const [users] = await pool.execute(
       `SELECT u.user_id, u.role_id, u.branch_id, u.is_active, r.role_name
-       FROM "user" u
+       FROM users u
        LEFT JOIN role r ON u.role_id = r.role_id
        WHERE u.user_id = ?`,
       [req.user.user_id]

@@ -35,7 +35,7 @@ const requirePasswordChange = async (req, res, next) => {
       // Fallback: query database if flags not in req.user
       const [users] = await pool.execute(
         `SELECT u.user_id, u.must_change_password, u.is_temporary_password, r.role_name
-         FROM user u
+         FROM users u
          LEFT JOIN role r ON u.role_id = r.role_id
          WHERE u.user_id = ?`,
         [userId]

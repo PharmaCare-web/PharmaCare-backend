@@ -38,6 +38,25 @@ router.get('/admin/managers/branch/:branch_id', authMiddleware, adminAuth, admin
 router.put('/admin/managers/:user_id/activate', authMiddleware, adminAuth, adminManagerController.activateManager);
 router.put('/admin/managers/:user_id/deactivate', authMiddleware, adminAuth, adminManagerController.deactivateManager);
 
+// Shorter alias routes for activation (for convenience)
+// Note: PUT is preferred for state-changing operations, but GET is also supported for convenience
+router.put('/admin/activate/:id', authMiddleware, adminAuth, (req, res, next) => {
+  req.params.user_id = req.params.id;
+  adminManagerController.activateManager(req, res, next);
+});
+router.get('/admin/activate/:id', authMiddleware, adminAuth, (req, res, next) => {
+  req.params.user_id = req.params.id;
+  adminManagerController.activateManager(req, res, next);
+});
+router.put('/admin/deactivate/:id', authMiddleware, adminAuth, (req, res, next) => {
+  req.params.user_id = req.params.id;
+  adminManagerController.deactivateManager(req, res, next);
+});
+router.get('/admin/deactivate/:id', authMiddleware, adminAuth, (req, res, next) => {
+  req.params.user_id = req.params.id;
+  adminManagerController.deactivateManager(req, res, next);
+});
+
 // Manager Dashboard Routes (Manager only - branch-specific data)
 router.get('/manager/dashboard', authMiddleware, managerAuth, managerDashboardController.getDashboardSummary);
 router.get('/manager/dashboard/branch', authMiddleware, managerAuth, managerDashboardController.getBranchOverview);
