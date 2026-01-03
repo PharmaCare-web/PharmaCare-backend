@@ -863,8 +863,8 @@ const changePassword = async (req, res, next) => {
     await pool.execute(
       `UPDATE users 
        SET password = ?,
-           is_temporary_password = 0,
-           must_change_password = 0,
+           is_temporary_password = FALSE,
+           must_change_password = FALSE,
            password_changed_at = CURRENT_TIMESTAMP
        WHERE user_id = ?`,
       [hashedNewPassword, usersId]
