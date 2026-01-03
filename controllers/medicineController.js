@@ -89,16 +89,17 @@ const getMedicineById = async (req, res, next) => {
 const searchMedicines = async (req, res, next) => {
   try {
     const branchId = req.user.branch_id;
-    const { search } = req.query;
+    // Accept both 'q' and 'search' query parameters for compatibility
+    const searchQuery = req.query.q || req.query.search;
 
-    if (!search || search.trim() === '') {
+    if (!searchQuery || searchQuery.trim() === '') {
       return res.status(400).json({
         success: false,
-        message: 'Search query is required'
+        message: 'Search query is required. Use query parameter "q" or "search".'
       });
     }
 
-    const searchTerm = `%${search.trim()}%`;
+    const searchTerm = `%${searchQuery.trim()}%`;
 
     const [medicines] = await pool.execute(
       `SELECT 
@@ -130,7 +131,7 @@ const searchMedicines = async (req, res, next) => {
       data: medicines,
       message: 'Search completed successfully',
       count: medicines.length,
-      searchQuery: search
+      searchQuery: searchQuery
     });
   } catch (error) {
     console.error('Search medicines error:', error);
