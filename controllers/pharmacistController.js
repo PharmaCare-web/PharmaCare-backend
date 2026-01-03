@@ -772,8 +772,8 @@ const getInventorySummary = async (req, res, next) => {
       FROM category c
       LEFT JOIN medicine m ON c.category_id = m.category_id AND m.branch_id = ?
       GROUP BY c.category_id, c.category_name
-      HAVING medicine_count > 0
-      ORDER BY medicine_count DESC`,
+      HAVING COUNT(m.medicine_id) > 0
+      ORDER BY COUNT(m.medicine_id) DESC`,
       [branchId]
     );
 
