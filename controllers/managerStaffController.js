@@ -101,16 +101,29 @@ const createStaff = async (req, res, next) => {
       throw new Error('Failed to create users record');
     }
 
-    // Send verification code email to staff member
+    // Send verification code email to staff member (Pharmacist/Cashier)
     let emailSent = false;
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    let emailError = null;
+    
+    if (process.env.BREVO_API_KEY) {
       try {
+        console.log(`📧 Attempting to send verification email to ${email} (${full_name})...`);
         await sendVerificationEmail(email, verificationCode, full_name);
         emailSent = true;
-        console.log(`✅ Verification code sent to ${email}`);
-      } catch (emailError) {
-        console.error('Failed to send verification email:', emailError.message);
+        console.log(`✅ Verification code sent successfully to ${email}`);
+      } catch (err) {
+        emailError = err;
+        console.error('❌ Failed to send verification email:', err.message);
+        console.error('Error details:', {
+          message: err.message,
+          code: err.code,
+          response: err.response?.body || err.body
+        });
+        // Don't fail the request if email fails - code is still generated
       }
+    } else {
+      console.warn('⚠️  BREVO_API_KEY not configured - verification email will not be sent');
+      console.warn('   Set BREVO_API_KEY in .env to enable email sending');
     }
 
     // Get created users info
@@ -126,11 +139,16 @@ const createStaff = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'Staff member account created. Verification code sent to email.',
+      message: emailSent 
+        ? 'Staff member account created. Verification code sent to email.'
+        : process.env.BREVO_API_KEY
+          ? 'Staff member account created. Verification code generated but email failed to send.'
+          : 'Staff member account created. Verification code generated (email not configured).',
       data: {
         users: newUser[0],
         verificationCode: emailSent ? undefined : verificationCode,  // Only return if email not sent
         emailSent: emailSent,
+        emailError: emailError && process.env.NODE_ENV === 'development' ? emailError.message : undefined,
         note: emailSent 
           ? 'Verification code sent to staff email. Staff member should provide the code to you for verification.'
           : 'Verification code generated. Send it to the staff member and verify using the verification endpoint.'
@@ -378,7 +396,7 @@ const resetStaffPassword = async (req, res, next) => {
 
     // Send email if configured
     let emailSent = false;
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    if (process.env.BREVO_API_KEY) {
       try {
         await sendPasswordResetEmail(staff[0].email, temporaryPassword, staff[0].full_name);
         emailSent = true;
@@ -512,13 +530,13 @@ const verifyStaffCode = async (req, res, next) => {
     // For staff accounts (Pharmacist/Cashier), activate immediately - NO admin approval needed
     const [updateResult] = await pool.execute(
       `UPDATE users 
-       SET is_email_verified = 1,
+       SET is_email_verified = TRUE,
            verification_code = NULL,
            verification_code_expires = NULL,
            password = ?,
-           is_active = 1,
-           is_temporary_password = 1,
-           must_change_password = 1
+           is_active = TRUE,
+           is_temporary_password = TRUE,
+           must_change_password = TRUE
        WHERE user_id = ?`,
       [hashedPassword, user_id]
     );
@@ -537,7 +555,7 @@ const verifyStaffCode = async (req, res, next) => {
 
     // Send temporary password email to staff member
     let emailSent = false;
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    if (process.env.BREVO_API_KEY) {
       try {
         await sendPasswordResetEmail(staffMember.email, temporaryPassword, staffMember.full_name);
         emailSent = true;
