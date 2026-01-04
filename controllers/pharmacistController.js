@@ -313,21 +313,65 @@ const createSale = async (req, res, next) => {
     }
 
     // Get complete sale details using a fresh connection from the pool (outside transaction)
-    const [saleDetails] = await pool.execute(
-      `SELECT 
-        s.sale_id,
-        s.sale_date,
-        s.total_amount,
-        s.status,
-        u.full_name as pharmacist_name,
-        p.payment_type,
-        p.amount as payment_amount
-      FROM sale s
-      LEFT JOIN "user" u ON s.user_id = u.user_id
-      LEFT JOIN payment p ON s.sale_id = p.sale_id
-      WHERE s.sale_id = ?`,
-      [saleId]
-    );
+    // Try users table first (production), fallback to "user" if needed
+    let saleDetails;
+    try {
+      [saleDetails] = await pool.execute(
+        `SELECT 
+          s.sale_id,
+          s.sale_date,
+          s.total_amount,
+          s.status,
+          u.full_name as pharmacist_name,
+          p.payment_type,
+          p.amount as payment_amount
+        FROM sale s
+        LEFT JOIN users u ON s.user_id = u.user_id
+        LEFT JOIN payment p ON s.sale_id = p.sale_id
+        WHERE s.sale_id = ?`,
+        [saleId]
+      );
+    } catch (userTableError) {
+      // If users table doesn't exist (42P01), try "user" table (quoted)
+      if (userTableError.code === '42P01') {
+        try {
+          [saleDetails] = await pool.execute(
+            `SELECT 
+              s.sale_id,
+              s.sale_date,
+              s.total_amount,
+              s.status,
+              u.full_name as pharmacist_name,
+              p.payment_type,
+              p.amount as payment_amount
+            FROM sale s
+            LEFT JOIN "user" u ON s.user_id = u.user_id
+            LEFT JOIN payment p ON s.sale_id = p.sale_id
+            WHERE s.sale_id = ?`,
+            [saleId]
+          );
+        } catch (quotedUserError) {
+          // If both fail, just get sale without user info
+          [saleDetails] = await pool.execute(
+            `SELECT 
+              s.sale_id,
+              s.sale_date,
+              s.total_amount,
+              s.status,
+              NULL as pharmacist_name,
+              p.payment_type,
+              p.amount as payment_amount
+            FROM sale s
+            LEFT JOIN payment p ON s.sale_id = p.sale_id
+            WHERE s.sale_id = ?`,
+            [saleId]
+          );
+        }
+      } else {
+        // Re-throw if it's a different error
+        throw userTableError;
+      }
+    }
 
     const [saleItems] = await pool.execute(
       `SELECT 
