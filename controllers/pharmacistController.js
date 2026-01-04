@@ -199,6 +199,7 @@ const createSale = async (req, res, next) => {
 
     // Calculate total amount
     let totalAmount = 0;
+    let saleId = null; // Declare saleId outside transaction so it's accessible after
     const connection = await pool.getConnection();
     await connection.beginTransaction();
 
@@ -234,7 +235,7 @@ const createSale = async (req, res, next) => {
         [branchId, usersId, totalAmount]
       );
 
-      const saleId = saleResult.length > 0 ? (saleResult[0].sale_id || saleResult[0].id) : null;
+      saleId = saleResult.length > 0 ? (saleResult[0].sale_id || saleResult[0].id) : null;
       if (!saleId) {
         throw new Error('Failed to create sale record');
       }
@@ -304,6 +305,11 @@ const createSale = async (req, res, next) => {
       if (connection && typeof connection.release === 'function') {
         connection.release();
       }
+    }
+
+    // Verify saleId was created successfully
+    if (!saleId) {
+      throw new Error('Failed to create sale - saleId is missing');
     }
 
     // Get complete sale details using a fresh connection from the pool (outside transaction)
