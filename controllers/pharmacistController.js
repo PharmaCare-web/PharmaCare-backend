@@ -296,54 +296,57 @@ const createSale = async (req, res, next) => {
       }
 
       await connection.commit();
-      connection.release();
-
-      // Get complete sale details
-      const [saleDetails] = await pool.execute(
-        `SELECT 
-          s.sale_id,
-          s.sale_date,
-          s.total_amount,
-          s.status,
-          u.full_name as pharmacist_name,
-          p.payment_type,
-          p.amount as payment_amount
-        FROM sale s
-        LEFT JOIN "user" u ON s.user_id = u.user_id
-        LEFT JOIN payment p ON s.sale_id = p.sale_id
-        WHERE s.sale_id = ?`,
-        [saleId]
-      );
-
-      const [saleItems] = await pool.execute(
-        `SELECT 
-          si.sale_item_id,
-          si.quantity,
-          si.unit_price,
-          si.subtotal,
-          m.name as medicine_name,
-          m.barcode
-        FROM sale_item si
-        LEFT JOIN medicine m ON si.medicine_id = m.medicine_id
-        WHERE si.sale_id = ?`,
-        [saleId]
-      );
-
-      res.status(201).json({
-        success: true,
-        message: 'Sale created successfully. Payment pending cashier approval.',
-        data: {
-          sale: saleDetails[0],
-          items: saleItems,
-          status: 'pending_payment',
-          note: 'Payment will be processed by cashier'
-        }
-      });
     } catch (error) {
       await connection.rollback();
-      connection.release();
       throw error;
+    } finally {
+      // Always release the connection, even if there was an error
+      if (connection && typeof connection.release === 'function') {
+        connection.release();
+      }
     }
+
+    // Get complete sale details using a fresh connection from the pool (outside transaction)
+    const [saleDetails] = await pool.execute(
+      `SELECT 
+        s.sale_id,
+        s.sale_date,
+        s.total_amount,
+        s.status,
+        u.full_name as pharmacist_name,
+        p.payment_type,
+        p.amount as payment_amount
+      FROM sale s
+      LEFT JOIN "user" u ON s.user_id = u.user_id
+      LEFT JOIN payment p ON s.sale_id = p.sale_id
+      WHERE s.sale_id = ?`,
+      [saleId]
+    );
+
+    const [saleItems] = await pool.execute(
+      `SELECT 
+        si.sale_item_id,
+        si.quantity,
+        si.unit_price,
+        si.subtotal,
+        m.name as medicine_name,
+        m.barcode
+      FROM sale_item si
+      LEFT JOIN medicine m ON si.medicine_id = m.medicine_id
+      WHERE si.sale_id = ?`,
+      [saleId]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Sale created successfully. Payment pending cashier approval.',
+      data: {
+        sale: saleDetails[0],
+        items: saleItems,
+        status: 'pending_payment',
+        note: 'Payment will be processed by cashier'
+      }
+    });
   } catch (error) {
     console.error('Create sale error:', error);
     next(error);
