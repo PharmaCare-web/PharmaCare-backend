@@ -174,12 +174,12 @@ const acceptPayment = async (req, res, next) => {
       }
 
       // Update stock for all medicines in the sale
-      const [saleItems] = await connection.execute(
+      const [saleItemsForStock] = await connection.execute(
         `SELECT medicine_id, quantity FROM sale_item WHERE sale_id = ?`,
         [sale_id]
       );
 
-      for (const item of saleItems) {
+      for (const item of saleItemsForStock) {
         await connection.execute(
           `UPDATE medicine 
            SET quantity_in_stock = quantity_in_stock - ?,
