@@ -127,6 +127,7 @@ router.get('/cashier/notifications', authMiddleware, requirePasswordChange, cash
 
 // 3. Return Management
 router.get('/cashier/returns/sales', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getSalesForReturn);
+router.get('/cashier/returns/receipt/:receipt_number', authMiddleware, requirePasswordChange, cashierAuth, cashierController.findSaleByReceiptNumber);
 router.get('/cashier/returns/sales/:sale_id/items', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getSaleItemsForReturn);
 router.post('/cashier/returns', authMiddleware, requirePasswordChange, cashierAuth, cashierController.processReturn);
 router.get('/cashier/reports/returns', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getReturnReports);

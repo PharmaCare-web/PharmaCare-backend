@@ -849,13 +849,86 @@ Authorization: Bearer <cashier_token>
 
 **Query Parameters (Optional):**
 - `sale_id`: Filter by sale ID
-- `start_date`: Start date (YYYY-MM-DD)
-- `end_date`: End date (YYYY-MM-DD)
+- `receipt_number`: Filter by receipt number (e.g., "REC-000008" or "REC000008")
 
 **Example:**
 ```
-GET {{base_url}}/api/cashier/returns/sales?start_date=2024-01-01
+GET {{base_url}}/api/cashier/returns/sales?receipt_number=REC-000008
 ```
+
+**Expected Response:** 200 OK
+```json
+{
+  "success": true,
+  "message": "Sales retrieved successfully",
+  "data": [
+    {
+      "sale_id": 8,
+      "sale_date": "2024-01-15T10:30:00Z",
+      "total_amount": 25.50,
+      "status": "completed",
+      "pharmacist_name": "John Pharmacist",
+      "receipt_number": "REC-000008"
+    }
+  ]
+}
+```
+
+#### Find Sale by Receipt Number
+
+**Endpoint:** `GET {{base_url}}/api/cashier/returns/receipt/:receipt_number`
+
+**Headers:**
+```
+Authorization: Bearer <cashier_token>
+```
+
+**Description:** 
+Finds a completed sale by receipt number. This is useful when a customer wants to return items and provides their receipt number.
+
+**Example:**
+```
+GET {{base_url}}/api/cashier/returns/receipt/REC-000008
+```
+
+**Note:** Receipt number format can be:
+- `REC-000008` (with dash)
+- `REC000008` (without dash)
+- Case insensitive
+
+**Expected Response:** 200 OK
+```json
+{
+  "success": true,
+  "message": "Sale found successfully",
+  "data": {
+    "sale": {
+      "sale_id": 8,
+      "sale_date": "2024-01-15T10:30:00Z",
+      "total_amount": 25.50,
+      "status": "completed",
+      "receipt_number": "REC-000008",
+      "pharmacist_name": "John Pharmacist"
+    },
+    "items": [
+      {
+        "sale_item_id": 50,
+        "medicine_id": 2,
+        "medicine_name": "Paracetamol",
+        "barcode": "1234567890123",
+        "quantity": 2,
+        "unit_price": 2.50,
+        "subtotal": 5.00,
+        "already_returned": 0
+      }
+    ]
+  }
+}
+```
+
+**Note:** 
+- `already_returned` shows how many items have already been returned from this sale
+- Only completed sales can be returned
 
 #### Get Sale Items for Return
 
@@ -911,10 +984,19 @@ Content-Type: application/json
 }
 ```
 
+**Workflow:**
+1. Customer provides receipt number (e.g., "REC-000008")
+2. Cashier uses `GET /cashier/returns/receipt/:receipt_number` to find the sale
+3. Cashier selects the medicine and quantity to return
+4. Cashier processes the return with reason
+5. Stock is automatically added back
+6. Return appears in inventory summary reports
+
 **Note:**
 - `sale_id`, `medicine_id`, `quantity_returned`, and `return_reason` are required
 - `return_condition` is optional (defaults to "good")
 - Stock is automatically updated when return is processed
+- Return will appear in manager and pharmacist inventory summary reports
 
 **Expected Response:** 201 Created
 ```json
@@ -1191,6 +1273,135 @@ This section demonstrates the complete workflow from pharmacist creating a sale 
 **Result:**
 - Shows the sold medicine in the report
 - Displays total quantity sold, revenue, etc.
+
+---
+
+### Return Flow: Customer Return with Receipt
+
+This section demonstrates the complete return workflow when a customer wants to return items.
+
+#### Step 1: Customer Provides Receipt Number
+
+Customer provides receipt number (e.g., "REC-000008")
+
+#### Step 2: Cashier Finds Sale by Receipt Number
+
+**Endpoint:** `GET {{base_url}}/api/cashier/returns/receipt/REC-000008`
+
+**Result:**
+- Returns sale details with all items
+- Shows `already_returned` quantity for each item
+- Displays receipt number, date, pharmacist name
+
+**Expected Response:** 200 OK
+```json
+{
+  "success": true,
+  "message": "Sale found successfully",
+  "data": {
+    "sale": {
+      "sale_id": 8,
+      "sale_date": "2024-01-15T10:30:00Z",
+      "total_amount": 25.50,
+      "status": "completed",
+      "receipt_number": "REC-000008",
+      "pharmacist_name": "John Pharmacist"
+    },
+    "items": [
+      {
+        "sale_item_id": 50,
+        "medicine_id": 2,
+        "medicine_name": "Paracetamol",
+        "barcode": "1234567890123",
+        "quantity": 2,
+        "unit_price": 2.50,
+        "subtotal": 5.00,
+        "already_returned": 0
+      }
+    ]
+  }
+}
+```
+
+#### Step 3: Cashier Processes Return
+
+**Endpoint:** `POST {{base_url}}/api/cashier/returns`
+
+**Request:**
+```json
+{
+  "sale_id": 8,
+  "medicine_id": 2,
+  "quantity_returned": 1,
+  "return_reason": "defective",
+  "return_condition": "damaged"
+}
+```
+
+**Result:**
+- Return record created
+- **Stock is automatically added back** to inventory
+- Return appears in reports
+
+**Expected Response:** 201 Created
+```json
+{
+  "success": true,
+  "message": "Return processed successfully and stock updated",
+  "data": {
+    "return_id": 10,
+    "sale_id": 8,
+    "medicine_id": 2,
+    "quantity_returned": 1,
+    "return_reason": "defective",
+    "return_condition": "damaged",
+    "return_date": "2024-01-15T11:00:00Z",
+    "status": "completed",
+    "medicine_name": "Paracetamol",
+    "barcode": "1234567890123"
+  }
+}
+```
+
+#### Step 4: Manager/Pharmacist Views Inventory Summary
+
+**Manager Endpoint:** `GET {{base_url}}/api/manager/reports/inventory-summary`
+
+**Pharmacist Endpoint:** `GET {{base_url}}/api/pharmacist/reports/inventory-summary`
+
+**Result:**
+- Shows updated stock quantities (includes returned items)
+- Displays `recentReturns` information:
+  - Total returns in last 30 days
+  - Total quantity returned
+  - Number of medicines returned
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "totalMedicines": 150,
+      "totalQuantity": 5012,
+      "lowStockCount": 12,
+      "expiringSoonCount": 5,
+      "recentReturns": {
+        "total_returns": 5,
+        "total_quantity_returned": 12,
+        "medicines_returned": 3
+      }
+    },
+    "lowStockMedicines": [...],
+    "expiredMedicines": [...]
+  }
+}
+```
+
+**Note:**
+- The `totalQuantity` includes items that were returned and added back to stock
+- `recentReturns` shows return activity in the last 30 days
+- Both Manager and Pharmacist can see this information in their inventory summary
 
 ---
 

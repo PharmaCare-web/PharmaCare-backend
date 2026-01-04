@@ -843,6 +843,20 @@ const getInventorySummary = async (req, res, next) => {
       [branchId]
     );
 
+    // Get recent returns (last 30 days) that affected stock
+    const [recentReturns] = await pool.execute(
+      `SELECT 
+        COUNT(*) as total_returns,
+        SUM(rt.quantity_returned) as total_quantity_returned,
+        COUNT(DISTINCT rt.medicine_id) as medicines_returned
+      FROM return_table rt
+      INNER JOIN sale s ON rt.sale_id = s.sale_id
+      WHERE s.branch_id = ?
+        AND rt.return_date >= CURRENT_DATE - INTERVAL '30 days'
+        AND rt.status = 'completed'`,
+      [branchId]
+    );
+
     const [categories] = await pool.execute(
       `SELECT 
         c.category_name,
@@ -859,7 +873,14 @@ const getInventorySummary = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        summary: summary[0],
+        summary: {
+          ...summary[0],
+          recent_returns: recentReturns[0] || {
+            total_returns: 0,
+            total_quantity_returned: 0,
+            medicines_returned: 0
+          }
+        },
         by_category: categories
       },
       message: 'Inventory summary retrieved successfully'

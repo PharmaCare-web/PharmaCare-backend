@@ -346,7 +346,12 @@ const getInventorySummary = async (req, res, next) => {
           totalQuantity: parseInt(inventoryData[0].total_quantity) || 0,
           lowStockCount: inventoryData[0].low_stock_count,
           expiringSoonCount: inventoryData[0].expiring_soon_count,
-          expiredCount: inventoryData[0].expired_count
+          expiredCount: inventoryData[0].expired_count,
+          recentReturns: recentReturns[0] || {
+            total_returns: 0,
+            total_quantity_returned: 0,
+            medicines_returned: 0
+          }
         },
         lowStockMedicines: lowStockMedicines,
         expiredMedicines: expiredMedicines

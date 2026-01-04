@@ -23,7 +23,7 @@ const getPendingPayments = async (req, res, next) => {
         u.user_id as pharmacist_id,
         COUNT(si.sale_item_id) as item_count
       FROM sale s
-      INNER JOIN "user" u ON s.user_id = u.user_id
+      INNER JOIN users u ON s.user_id = u.user_id
       INNER JOIN role r ON u.role_id = r.role_id
       LEFT JOIN sale_item si ON s.sale_id = si.sale_id
       WHERE s.branch_id = ? 
@@ -61,7 +61,7 @@ const getPaymentRequestDetails = async (req, res, next) => {
         u.full_name as pharmacist_name,
         u.user_id as pharmacist_id
       FROM sale s
-      INNER JOIN "user" u ON s.user_id = u.user_id
+      INNER JOIN users u ON s.user_id = u.user_id
       WHERE s.sale_id = ? AND s.branch_id = ?`,
       [sale_id, branchId]
     );
@@ -108,8 +108,15 @@ const acceptPayment = async (req, res, next) => {
   try {
     const branchId = req.cashier.branch_id;
     const cashierId = req.cashier.user_id;
-    const { sale_id } = req.params;
+    const sale_id = parseInt(req.params.sale_id, 10);
     const { payment_type, reference_number } = req.body;
+
+    if (!sale_id || isNaN(sale_id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid sale_id parameter'
+      });
+    }
 
     if (!payment_type) {
       return res.status(400).json({
@@ -202,23 +209,50 @@ const acceptPayment = async (req, res, next) => {
       await connection.commit();
 
       // Get complete sale details for receipt
-      const [saleDetails] = await pool.execute(
-        `SELECT 
-          s.sale_id,
-          s.sale_date,
-          s.total_amount,
-          s.status,
-          u.full_name as cashier_name,
-          p.payment_type,
-          p.amount as payment_amount,
-          p.payment_date,
-          p.reference_number
-        FROM sale s
-        LEFT JOIN "user" u ON s.user_id = u.user_id
-        LEFT JOIN payment p ON s.sale_id = p.sale_id
-        WHERE s.sale_id = ?`,
-        [sale_id]
-      );
+      // Try users table first (production), fallback to "user" if needed
+      let saleDetails;
+      try {
+        [saleDetails] = await pool.execute(
+          `SELECT 
+            s.sale_id,
+            s.sale_date,
+            s.total_amount,
+            s.status,
+            u.full_name as cashier_name,
+            p.payment_type,
+            p.amount as payment_amount,
+            p.payment_date,
+            p.reference_number
+          FROM sale s
+          LEFT JOIN users u ON s.user_id = u.user_id
+          LEFT JOIN payment p ON s.sale_id = p.sale_id
+          WHERE s.sale_id = ?`,
+          [sale_id]
+        );
+      } catch (userTableError) {
+        // If users table doesn't exist (42P01), try "user" table (quoted)
+        if (userTableError.code === '42P01') {
+          [saleDetails] = await pool.execute(
+            `SELECT 
+              s.sale_id,
+              s.sale_date,
+              s.total_amount,
+              s.status,
+              u.full_name as cashier_name,
+              p.payment_type,
+              p.amount as payment_amount,
+              p.payment_date,
+              p.reference_number
+            FROM sale s
+            LEFT JOIN users u ON s.user_id = u.user_id
+            LEFT JOIN payment p ON s.sale_id = p.sale_id
+            WHERE s.sale_id = ?`,
+            [sale_id]
+          );
+        } else {
+          throw userTableError;
+        }
+      }
 
       const [saleItems] = await pool.execute(
         `SELECT 
@@ -276,7 +310,7 @@ const getReceipt = async (req, res, next) => {
         p.payment_date,
         p.reference_number
       FROM sale s
-      LEFT JOIN "user" u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.user_id
       LEFT JOIN payment p ON s.sale_id = p.sale_id
       WHERE s.sale_id = ? AND s.branch_id = ?`,
       [sale_id, branchId]
@@ -342,7 +376,7 @@ const getPaymentReports = async (req, res, next) => {
         u.full_name as cashier_name
       FROM payment p
       INNER JOIN sale s ON p.sale_id = s.sale_id
-      LEFT JOIN "user" u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.user_id
       WHERE s.branch_id = ?
     `;
     const params = [branchId];
@@ -481,38 +515,39 @@ const processReturn = async (req, res, next) => {
       );
 
       await connection.commit();
-
-      // Get return details
-      const [returnDetails] = await pool.execute(
-        `SELECT 
-          rt.return_id,
-          rt.sale_id,
-          rt.medicine_id,
-          rt.quantity_returned,
-          rt.return_reason,
-          rt.return_condition,
-          rt.return_date,
-          rt.status,
-          m.name as medicine_name,
-          m.barcode
-        FROM return_table rt
-        INNER JOIN medicine m ON rt.medicine_id = m.medicine_id
-        WHERE rt.return_id = ?`,
-        [returnId]
-      );
-
-      connection.release();
-
-      res.status(201).json({
-        success: true,
-        message: 'Return processed successfully and stock updated',
-        data: returnDetails[0]
-      });
     } catch (error) {
       await connection.rollback();
-      connection.release();
       throw error;
+    } finally {
+      if (connection && typeof connection.release === 'function') {
+        connection.release();
+      }
     }
+
+    // Get return details using a fresh connection from the pool
+    const [returnDetails] = await pool.execute(
+      `SELECT 
+        rt.return_id,
+        rt.sale_id,
+        rt.medicine_id,
+        rt.quantity_returned,
+        rt.return_reason,
+        rt.return_condition,
+        rt.return_date,
+        rt.status,
+        m.name as medicine_name,
+        m.barcode
+      FROM return_table rt
+      INNER JOIN medicine m ON rt.medicine_id = m.medicine_id
+      WHERE rt.return_id = ?`,
+      [returnId]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Return processed successfully and stock updated',
+      data: returnDetails[0]
+    });
   } catch (error) {
     console.error('Process return error:', error);
     next(error);
@@ -592,7 +627,7 @@ const getReturnReports = async (req, res, next) => {
 const getSalesForReturn = async (req, res, next) => {
   try {
     const branchId = req.cashier.branch_id;
-    const { sale_id } = req.query;
+    const { sale_id, receipt_number } = req.query;
 
     let query = `
       SELECT 
@@ -600,16 +635,27 @@ const getSalesForReturn = async (req, res, next) => {
         s.sale_date,
         s.total_amount,
         s.status,
-        u.full_name as pharmacist_name
+        u.full_name as pharmacist_name,
+        CONCAT('REC-', LPAD(s.sale_id::text, 6, '0')) as receipt_number
       FROM sale s
-      LEFT JOIN "user" u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.user_id
       WHERE s.branch_id = ? AND s.status = 'completed'
     `;
     const params = [branchId];
 
     if (sale_id) {
       query += ` AND s.sale_id = ?`;
-      params.push(sale_id);
+      params.push(parseInt(sale_id, 10));
+    }
+
+    if (receipt_number) {
+      // Extract sale_id from receipt number (format: REC-000008)
+      const receiptMatch = receipt_number.match(/REC-?(\d+)/i);
+      if (receiptMatch) {
+        const extractedSaleId = parseInt(receiptMatch[1], 10);
+        query += ` AND s.sale_id = ?`;
+        params.push(extractedSaleId);
+      }
     }
 
     query += ` ORDER BY s.sale_date DESC LIMIT 100`;
@@ -623,6 +669,85 @@ const getSalesForReturn = async (req, res, next) => {
     });
   } catch (error) {
     console.error('Get sales for return error:', error);
+    next(error);
+  }
+};
+
+// Find sale by receipt number (for returns)
+const findSaleByReceiptNumber = async (req, res, next) => {
+  try {
+    const branchId = req.cashier.branch_id;
+    const { receipt_number } = req.params;
+
+    if (!receipt_number) {
+      return res.status(400).json({
+        success: false,
+        message: 'receipt_number is required'
+      });
+    }
+
+    // Extract sale_id from receipt number (format: REC-000008 or REC000008)
+    const receiptMatch = receipt_number.match(/REC-?(\d+)/i);
+    if (!receiptMatch) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid receipt number format. Expected format: REC-000008 or REC000008'
+      });
+    }
+
+    const saleId = parseInt(receiptMatch[1], 10);
+
+    // Get sale details
+    const [sales] = await pool.execute(
+      `SELECT 
+        s.sale_id,
+        s.sale_date,
+        s.total_amount,
+        s.status,
+        CONCAT('REC-', LPAD(s.sale_id::text, 6, '0')) as receipt_number,
+        u.full_name as pharmacist_name
+      FROM sale s
+      LEFT JOIN users u ON s.user_id = u.user_id
+      WHERE s.sale_id = ? AND s.branch_id = ? AND s.status = 'completed'`,
+      [saleId, branchId]
+    );
+
+    if (sales.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sale not found with this receipt number or does not belong to your branch'
+      });
+    }
+
+    // Get sale items
+    const [saleItems] = await pool.execute(
+      `SELECT 
+        si.sale_item_id,
+        si.medicine_id,
+        si.quantity,
+        si.unit_price,
+        si.subtotal,
+        m.name as medicine_name,
+        m.barcode,
+        COALESCE(SUM(rt.quantity_returned), 0) as already_returned
+      FROM sale_item si
+      INNER JOIN medicine m ON si.medicine_id = m.medicine_id
+      LEFT JOIN return_table rt ON si.sale_id = rt.sale_id AND si.medicine_id = rt.medicine_id
+      WHERE si.sale_id = ?
+      GROUP BY si.sale_item_id, si.medicine_id, si.quantity, si.unit_price, si.subtotal, m.name, m.barcode`,
+      [saleId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Sale found successfully',
+      data: {
+        sale: sales[0],
+        items: saleItems
+      }
+    });
+  } catch (error) {
+    console.error('Find sale by receipt number error:', error);
     next(error);
   }
 };
@@ -820,6 +945,7 @@ module.exports = {
   getReturnReports,
   getSalesForReturn,
   getSaleItemsForReturn,
+  findSaleByReceiptNumber,
   // Notifications
   getNotifications,
   // Sold Medicines Report
