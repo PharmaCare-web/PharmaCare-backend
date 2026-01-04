@@ -115,14 +115,54 @@ app.get('/', (req, res) => {
 // Error handling middleware (must be last)
 app.use(errorHandler);
 
+// Auto-update database on startup (creates notification table if missing)
+async function ensureDatabaseSchema() {
+  try {
+    const pool = require('./config/database');
+    // Wait a moment for connection to establish
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Create notification table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notification (
+        notification_id SERIAL PRIMARY KEY,
+        branch_id INTEGER NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        type VARCHAR(50) DEFAULT 'info',
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (branch_id) REFERENCES branch(branch_id) ON DELETE CASCADE
+      );
+    `);
+    
+    // Create indexes
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_branch_id ON notification(branch_id);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_is_read ON notification(is_read);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_type ON notification(type);`);
+    
+    console.log('✅ Database schema verified (notification table ready)');
+  } catch (error) {
+    // Don't fail startup if table creation fails (might already exist or connection issue)
+    console.warn('⚠️  Could not verify notification table (non-critical):', error.message);
+  }
+}
+
 // Start server
 const HOST = process.env.NODE_ENV === 'production' ? '0.0.0.0' : 'localhost';
-app.listen(PORT, HOST, () => {
-  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
-  console.log(`📡 API endpoints available at http://${HOST}:${PORT}/api`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  if (process.env.NODE_ENV === 'production') {
-    console.log(`🔒 CORS: ${process.env.FRONTEND_URL || 'NOT CONFIGURED - REQUIRED!'}`);
-  }
+
+// Ensure database schema before starting server
+ensureDatabaseSchema().then(() => {
+  app.listen(PORT, HOST, () => {
+    console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+    console.log(`📡 API endpoints available at http://${HOST}:${PORT}/api`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    if (process.env.NODE_ENV === 'production') {
+      console.log(`🔒 CORS: ${process.env.FRONTEND_URL || 'NOT CONFIGURED - REQUIRED!'}`);
+    }
+  });
+}).catch((error) => {
+  console.error('❌ Failed to start server:', error);
+  process.exit(1);
 });
 

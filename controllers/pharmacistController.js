@@ -270,28 +270,36 @@ const createSale = async (req, res, next) => {
       // Get medicine names for notification
       const medicineIds = items.map(item => item.medicine_id);
       if (medicineIds.length > 0) {
-        const placeholders = medicineIds.map(() => '?').join(',');
-        const [medicines] = await connection.execute(
-          `SELECT medicine_id, name FROM medicine WHERE medicine_id IN (${placeholders})`,
-          medicineIds
-        );
-        const medicineNamesList = medicines.map(m => m.name).join(', ');
+        try {
+          const placeholders = medicineIds.map(() => '?').join(',');
+          const [medicines] = await connection.execute(
+            `SELECT medicine_id, name FROM medicine WHERE medicine_id IN (${placeholders})`,
+            medicineIds
+          );
+          const medicineNamesList = medicines.map(m => m.name).join(', ');
 
-        await connection.execute(
-          `INSERT INTO notification (branch_id, title, message, type, is_read, created_at)
-           VALUES (?, ?, ?, 'payment_request', FALSE, CURRENT_TIMESTAMP)`,
-          [
-            branchId,
-            'New Payment Request',
-            `Pharmacist ${pharmacistName} sent a payment request (Sale ID: ${saleId}) for: ${medicineNamesList}`
-          ]
-        );
+          // Try to create notification (table might not exist in older databases)
+          await connection.execute(
+            `INSERT INTO notification (branch_id, title, message, type, is_read, created_at)
+             VALUES (?, ?, ?, 'payment_request', FALSE, CURRENT_TIMESTAMP)`,
+            [
+              branchId,
+              'New Payment Request',
+              `Pharmacist ${pharmacistName} sent a payment request (Sale ID: ${saleId}) for: ${medicineNamesList}`
+            ]
+          );
+        } catch (notificationError) {
+          // If notification table doesn't exist, log but don't fail the sale
+          console.warn('⚠️  Could not create notification (table may not exist):', notificationError.message);
+          // Continue with sale creation - notification is optional
+        }
       }
 
       await connection.commit();
+      connection.release();
 
       // Get complete sale details
-      const [saleDetails] = await connection.execute(
+      const [saleDetails] = await pool.execute(
         `SELECT 
           s.sale_id,
           s.sale_date,
@@ -307,7 +315,7 @@ const createSale = async (req, res, next) => {
         [saleId]
       );
 
-      const [saleItems] = await connection.execute(
+      const [saleItems] = await pool.execute(
         `SELECT 
           si.sale_item_id,
           si.quantity,
@@ -320,8 +328,6 @@ const createSale = async (req, res, next) => {
         WHERE si.sale_id = ?`,
         [saleId]
       );
-
-      connection.release();
 
       res.status(201).json({
         success: true,
