@@ -258,15 +258,35 @@ const createSale = async (req, res, next) => {
           [saleId, medicine_id, quantity, unitPrice, subtotal]
         );
 
-        // Update stock
-        await connection.execute(
-          'UPDATE medicine SET quantity_in_stock = quantity_in_stock - ? WHERE medicine_id = ?',
-          [quantity, medicine_id]
-        );
+        // Stock will be updated when cashier accepts payment
       }
 
       // Payment record will be created by cashier when accepting payment
       // Don't create payment here - cashier will handle it
+
+      // Create notification for cashier about the payment request
+      const pharmacistName = req.users.full_name;
+      
+      // Get medicine names for notification
+      const medicineIds = items.map(item => item.medicine_id);
+      if (medicineIds.length > 0) {
+        const placeholders = medicineIds.map(() => '?').join(',');
+        const [medicines] = await connection.execute(
+          `SELECT medicine_id, name FROM medicine WHERE medicine_id IN (${placeholders})`,
+          medicineIds
+        );
+        const medicineNamesList = medicines.map(m => m.name).join(', ');
+
+        await connection.execute(
+          `INSERT INTO notification (branch_id, title, message, type, is_read, created_at)
+           VALUES (?, ?, ?, 'payment_request', FALSE, CURRENT_TIMESTAMP)`,
+          [
+            branchId,
+            'New Payment Request',
+            `Pharmacist ${pharmacistName} sent a payment request (Sale ID: ${saleId}) for: ${medicineNamesList}`
+          ]
+        );
+      }
 
       await connection.commit();
 
@@ -342,7 +362,7 @@ const getSaleById = async (req, res, next) => {
         p.payment_type,
         p.amount as payment_amount
       FROM sale s
-      LEFT JOIN users u ON s.user_id = u.user_id
+      LEFT JOIN "user" u ON s.user_id = u.user_id
       LEFT JOIN branch b ON s.branch_id = b.branch_id
       LEFT JOIN payment p ON s.sale_id = p.sale_id
       WHERE s.sale_id = ? AND s.branch_id = ?`,

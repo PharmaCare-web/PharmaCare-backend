@@ -173,6 +173,32 @@ const acceptPayment = async (req, res, next) => {
         );
       }
 
+      // Update stock for all medicines in the sale
+      const [saleItems] = await connection.execute(
+        `SELECT medicine_id, quantity FROM sale_item WHERE sale_id = ?`,
+        [sale_id]
+      );
+
+      for (const item of saleItems) {
+        await connection.execute(
+          `UPDATE medicine 
+           SET quantity_in_stock = quantity_in_stock - ?,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE medicine_id = ? AND branch_id = ?`,
+          [item.quantity, item.medicine_id, branchId]
+        );
+      }
+
+      // Mark notification as read
+      await connection.execute(
+        `UPDATE notification 
+         SET is_read = TRUE 
+         WHERE branch_id = ? 
+           AND type = 'payment_request' 
+           AND message LIKE ?`,
+        [branchId, `%Sale ID: ${sale_id}%`]
+      );
+
       await connection.commit();
 
       // Get complete sale details for receipt
@@ -650,6 +676,137 @@ const getSaleItemsForReturn = async (req, res, next) => {
   }
 };
 
+// ============================================================================
+// 4. NOTIFICATIONS
+// ============================================================================
+
+// Get notifications for cashier (payment requests)
+const getNotifications = async (req, res, next) => {
+  try {
+    const branchId = req.cashier.branch_id;
+
+    // Get payment request notifications
+    const [notifications] = await pool.execute(
+      `SELECT 
+        notification_id,
+        title,
+        message,
+        type,
+        is_read,
+        created_at
+       FROM notification
+       WHERE branch_id = ?
+         AND type = 'payment_request'
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [branchId]
+    );
+
+    // Extract sale_id from message for easier frontend use
+    const formattedNotifications = notifications.map(n => {
+      const saleIdMatch = n.message.match(/Sale ID: (\d+)/);
+      return {
+        notification_id: n.notification_id,
+        title: n.title,
+        message: n.message,
+        type: n.type,
+        is_read: n.is_read,
+        created_at: n.created_at,
+        sale_id: saleIdMatch ? parseInt(saleIdMatch[1]) : null
+      };
+    });
+
+    const unreadCount = notifications.filter(n => !n.is_read).length;
+
+    res.json({
+      success: true,
+      message: 'Notifications retrieved successfully',
+      data: {
+        notifications: formattedNotifications,
+        unread_count: unreadCount
+      }
+    });
+  } catch (error) {
+    console.error('Get notifications error:', error);
+    next(error);
+  }
+};
+
+// ============================================================================
+// 5. SOLD MEDICINES REPORT
+// ============================================================================
+
+// Get sold medicines report
+const getSoldMedicinesReport = async (req, res, next) => {
+  try {
+    const branchId = req.cashier.branch_id;
+    const { start_date, end_date, medicine_id } = req.query;
+
+    let query = `
+      SELECT 
+        m.medicine_id,
+        m.name as medicine_name,
+        m.barcode,
+        m.type,
+        c.category_name,
+        SUM(si.quantity) as total_quantity_sold,
+        SUM(si.subtotal) as total_revenue,
+        COUNT(DISTINCT s.sale_id) as sale_count,
+        AVG(si.unit_price) as average_price
+      FROM sale_item si
+      INNER JOIN sale s ON si.sale_id = s.sale_id
+      INNER JOIN medicine m ON si.medicine_id = m.medicine_id
+      LEFT JOIN category c ON m.category_id = c.category_id
+      WHERE s.branch_id = ? AND s.status = 'completed'
+    `;
+    const params = [branchId];
+
+    if (start_date) {
+      query += ` AND DATE(s.sale_date) >= ?`;
+      params.push(start_date);
+    }
+
+    if (end_date) {
+      query += ` AND DATE(s.sale_date) <= ?`;
+      params.push(end_date);
+    }
+
+    if (medicine_id) {
+      query += ` AND m.medicine_id = ?`;
+      params.push(medicine_id);
+    }
+
+    query += ` 
+      GROUP BY m.medicine_id, m.name, m.barcode, m.type, c.category_name
+      ORDER BY total_quantity_sold DESC
+    `;
+
+    const [soldMedicines] = await pool.execute(query, params);
+
+    // Calculate summary
+    const totalQuantity = soldMedicines.reduce((sum, m) => sum + (parseInt(m.total_quantity_sold) || 0), 0);
+    const totalRevenue = soldMedicines.reduce((sum, m) => sum + parseFloat(m.total_revenue || 0), 0);
+    const totalSales = soldMedicines.reduce((sum, m) => sum + (parseInt(m.sale_count) || 0), 0);
+
+    res.json({
+      success: true,
+      message: 'Sold medicines report retrieved successfully',
+      data: {
+        medicines: soldMedicines,
+        summary: {
+          total_medicines_sold: soldMedicines.length,
+          total_quantity_sold: totalQuantity,
+          total_revenue: totalRevenue,
+          total_sales: totalSales
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get sold medicines report error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   // Payment Management
   getPendingPayments,
@@ -662,6 +819,10 @@ module.exports = {
   processReturn,
   getReturnReports,
   getSalesForReturn,
-  getSaleItemsForReturn
+  getSaleItemsForReturn,
+  // Notifications
+  getNotifications,
+  // Sold Medicines Report
+  getSoldMedicinesReport
 };
 

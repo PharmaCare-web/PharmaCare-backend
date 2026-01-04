@@ -481,29 +481,59 @@ Content-Type: application/json
   "items": [
     {
       "medicine_id": 5,
-      "quantity": 2,
-      "price": 2.50
+      "quantity": 2
     },
     {
       "medicine_id": 10,
-      "quantity": 1,
-      "price": 5.00
+      "quantity": 1
     }
   ],
+  "payment_type": "cash",
   "customer_name": "John Doe",
-  "payment_method": "cash"
+  "customer_phone": "1234567890"
 }
 ```
+
+**Note:** 
+- `payment_type` is required (e.g., "cash", "card")
+- `customer_name` and `customer_phone` are optional
+- Medicine prices are automatically retrieved from the database
+- Stock is NOT updated at this stage - it will be updated when cashier accepts payment
+- A notification is automatically created for cashiers
 
 **Expected Response:** 201 Created
 ```json
 {
   "success": true,
-  "message": "Sale created successfully",
+  "message": "Sale created successfully. Payment pending cashier approval.",
   "data": {
-    "sale_id": 100,
-    "total_amount": 10.00,
-    "status": "pending_payment"
+    "sale": {
+      "sale_id": 100,
+      "sale_date": "2024-01-15T10:30:00Z",
+      "total_amount": 10.00,
+      "status": "pending_payment",
+      "pharmacist_name": "John Pharmacist"
+    },
+    "items": [
+      {
+        "sale_item_id": 50,
+        "medicine_id": 5,
+        "medicine_name": "Paracetamol",
+        "quantity": 2,
+        "unit_price": 2.50,
+        "subtotal": 5.00
+      },
+      {
+        "sale_item_id": 51,
+        "medicine_id": 10,
+        "medicine_name": "Ibuprofen",
+        "quantity": 1,
+        "unit_price": 5.00,
+        "subtotal": 5.00
+      }
+    ],
+    "status": "pending_payment",
+    "note": "Payment will be processed by cashier"
   }
 }
 ```
@@ -610,16 +640,18 @@ Authorization: Bearer <cashier_token>
 ```json
 {
   "success": true,
-  "data": {
-    "payments": [
-      {
-        "sale_id": 100,
-        "total_amount": 25.50,
-        "customer_name": "John Doe",
-        "created_at": "2024-01-15T10:30:00Z"
-      }
-    ]
-  }
+  "message": "Pending payments retrieved successfully",
+  "data": [
+    {
+      "sale_id": 100,
+      "sale_date": "2024-01-15T10:30:00Z",
+      "total_amount": 25.50,
+      "status": "pending_payment",
+      "pharmacist_name": "John Pharmacist",
+      "pharmacist_id": 42,
+      "item_count": 2
+    }
+  ]
 }
 ```
 
@@ -641,18 +673,27 @@ GET {{base_url}}/api/cashier/payments/100
 ```json
 {
   "success": true,
+  "message": "Payment request details retrieved successfully",
   "data": {
-    "sale_id": 100,
-    "total_amount": 25.50,
+    "sale": {
+      "sale_id": 100,
+      "sale_date": "2024-01-15T10:30:00Z",
+      "total_amount": 25.50,
+      "status": "pending_payment",
+      "pharmacist_name": "John Pharmacist",
+      "pharmacist_id": 42
+    },
     "items": [
       {
+        "sale_item_id": 50,
+        "medicine_id": 5,
         "medicine_name": "Paracetamol",
+        "barcode": "1234567890123",
         "quantity": 2,
-        "price": 2.50,
+        "unit_price": 2.50,
         "subtotal": 5.00
       }
-    ],
-    "customer_name": "John Doe"
+    ]
   }
 }
 ```
@@ -670,11 +711,19 @@ Content-Type: application/json
 **Body:**
 ```json
 {
-  "payment_method": "cash",
-  "amount_paid": 25.50,
-  "change": 0.00
+  "payment_type": "cash",
+  "reference_number": null
 }
 ```
+
+**Note:**
+- `payment_type` is required (e.g., "cash", "card", "mobile_payment")
+- `reference_number` is optional (for card transactions, etc.)
+- When payment is accepted:
+  - Sale status changes to "completed"
+  - Stock is updated (quantity reduced)
+  - Notification is marked as read
+  - Payment record is created
 
 **Expected Response:** 200 OK
 ```json
@@ -682,16 +731,79 @@ Content-Type: application/json
   "success": true,
   "message": "Payment accepted successfully",
   "data": {
-    "sale_id": 100,
-    "status": "completed",
-    "payment_id": 50
+    "sale": {
+      "sale_id": 100,
+      "sale_date": "2024-01-15T10:30:00Z",
+      "total_amount": 25.50,
+      "status": "completed",
+      "cashier_name": "Jane Cashier",
+      "payment_type": "cash",
+      "payment_amount": 25.50,
+      "payment_date": "2024-01-15T10:35:00Z",
+      "reference_number": null
+    },
+    "items": [
+      {
+        "sale_item_id": 50,
+        "medicine_name": "Paracetamol",
+        "barcode": "1234567890123",
+        "quantity": 2,
+        "unit_price": 2.50,
+        "subtotal": 5.00
+      }
+    ],
+    "receipt_number": "REC-000100",
+    "processed_by": 43
   }
 }
 ```
 
 ---
 
-### 2. Receipts
+### 2. Notifications
+
+#### Get Notifications
+
+**Endpoint:** `GET {{base_url}}/api/cashier/notifications`
+
+**Headers:**
+```
+Authorization: Bearer <cashier_token>
+```
+
+**Description:** 
+Retrieves payment request notifications for the cashier. Notifications are automatically created when a pharmacist creates a sale with `pending_payment` status.
+
+**Expected Response:** 200 OK
+```json
+{
+  "success": true,
+  "message": "Notifications retrieved successfully",
+  "data": {
+    "notifications": [
+      {
+        "notification_id": 15,
+        "title": "New Payment Request",
+        "message": "Pharmacist John Pharmacist sent a payment request (Sale ID: 100) for: Paracetamol, Ibuprofen",
+        "type": "payment_request",
+        "is_read": false,
+        "created_at": "2024-01-15T10:30:00Z",
+        "sale_id": 100
+      }
+    ],
+    "unread_count": 1
+  }
+}
+```
+
+**Note:**
+- Notifications are automatically marked as read when payment is accepted
+- `sale_id` is extracted from the message for easy access
+- Only payment request notifications are returned
+
+---
+
+### 3. Receipts
 
 #### Get Receipt
 
@@ -724,7 +836,7 @@ GET {{base_url}}/api/cashier/receipts/100
 
 ---
 
-### 3. Returns
+### 4. Returns
 
 #### Get Sales for Return
 
@@ -792,34 +904,41 @@ Content-Type: application/json
 ```json
 {
   "sale_id": 100,
-  "items": [
-    {
-      "sale_item_id": 50,
-      "medicine_id": 5,
-      "quantity_returned": 1,
-      "return_reason": "defective",
-      "return_condition": "damaged"
-    }
-  ]
+  "medicine_id": 5,
+  "quantity_returned": 1,
+  "return_reason": "defective",
+  "return_condition": "damaged"
 }
 ```
+
+**Note:**
+- `sale_id`, `medicine_id`, `quantity_returned`, and `return_reason` are required
+- `return_condition` is optional (defaults to "good")
+- Stock is automatically updated when return is processed
 
 **Expected Response:** 201 Created
 ```json
 {
   "success": true,
-  "message": "Return processed successfully",
+  "message": "Return processed successfully and stock updated",
   "data": {
     "return_id": 10,
     "sale_id": 100,
-    "total_refund": 2.50
+    "medicine_id": 5,
+    "quantity_returned": 1,
+    "return_reason": "defective",
+    "return_condition": "damaged",
+    "return_date": "2024-01-15T11:00:00Z",
+    "status": "completed",
+    "medicine_name": "Paracetamol",
+    "barcode": "1234567890123"
   }
 }
 ```
 
 ---
 
-### 4. Reports
+### 5. Reports
 
 #### Payment Reports
 
@@ -833,23 +952,39 @@ Authorization: Bearer <cashier_token>
 **Query Parameters (Optional):**
 - `start_date`: Start date (YYYY-MM-DD)
 - `end_date`: End date (YYYY-MM-DD)
-- `payment_method`: Filter by payment method (cash, card, etc.)
+- `payment_type`: Filter by payment type (cash, card, mobile_payment, etc.)
 
 **Example:**
 ```
-GET {{base_url}}/api/cashier/reports/payments?start_date=2024-01-01&payment_method=cash
+GET {{base_url}}/api/cashier/reports/payments?start_date=2024-01-01&payment_type=cash
 ```
 
 **Expected Response:** 200 OK
 ```json
 {
   "success": true,
+  "message": "Payment reports retrieved successfully",
   "data": {
-    "total_payments": 150,
-    "total_amount": 3750.50,
-    "by_method": {
-      "cash": 1000.00,
-      "card": 2750.50
+    "payments": [
+      {
+        "payment_id": 50,
+        "payment_type": "cash",
+        "amount": 25.50,
+        "payment_date": "2024-01-15T10:35:00Z",
+        "reference_number": null,
+        "sale_id": 100,
+        "sale_date": "2024-01-15T10:30:00Z",
+        "total_amount": 25.50,
+        "cashier_name": "Jane Cashier"
+      }
+    ],
+    "summary": {
+      "total_amount": 3750.50,
+      "total_count": 150,
+      "payment_type_summary": {
+        "cash": 1000.00,
+        "card": 2750.50
+      }
     }
   }
 }
@@ -872,6 +1007,190 @@ Authorization: Bearer <cashier_token>
 ```
 GET {{base_url}}/api/cashier/reports/returns?start_date=2024-01-01
 ```
+
+**Expected Response:** 200 OK
+```json
+{
+  "success": true,
+  "message": "Return reports retrieved successfully",
+  "data": {
+    "returns": [
+      {
+        "return_id": 10,
+        "sale_id": 100,
+        "medicine_id": 5,
+        "medicine_name": "Paracetamol",
+        "barcode": "1234567890123",
+        "quantity_returned": 1,
+        "return_reason": "defective",
+        "return_condition": "damaged",
+        "return_date": "2024-01-15T11:00:00Z",
+        "status": "completed",
+        "price": 2.50,
+        "return_value": 2.50
+      }
+    ],
+    "summary": {
+      "total_quantity_returned": 1,
+      "total_return_value": 2.50,
+      "total_count": 1,
+      "reason_summary": {
+        "defective": 1
+      }
+    }
+  }
+}
+```
+
+#### Sold Medicines Report
+
+**Endpoint:** `GET {{base_url}}/api/cashier/reports/sold-medicines`
+
+**Headers:**
+```
+Authorization: Bearer <cashier_token>
+```
+
+**Description:** 
+Retrieves a report of all sold medicines. Shows aggregated data including total quantity sold, revenue, and number of sales per medicine.
+
+**Query Parameters (Optional):**
+- `start_date`: Start date (YYYY-MM-DD) - Filter sales from this date
+- `end_date`: End date (YYYY-MM-DD) - Filter sales until this date
+- `medicine_id`: Filter by specific medicine ID
+
+**Example:**
+```
+GET {{base_url}}/api/cashier/reports/sold-medicines?start_date=2024-01-01&end_date=2024-01-31
+```
+
+**Expected Response:** 200 OK
+```json
+{
+  "success": true,
+  "message": "Sold medicines report retrieved successfully",
+  "data": {
+    "medicines": [
+      {
+        "medicine_id": 5,
+        "medicine_name": "Paracetamol",
+        "barcode": "1234567890123",
+        "type": "Tablet",
+        "category_name": "Pain Relief",
+        "total_quantity_sold": 25,
+        "total_revenue": 62.50,
+        "sale_count": 12,
+        "average_price": 2.50
+      },
+      {
+        "medicine_id": 10,
+        "medicine_name": "Ibuprofen",
+        "barcode": "9876543210987",
+        "type": "Tablet",
+        "category_name": "Pain Relief",
+        "total_quantity_sold": 15,
+        "total_revenue": 75.00,
+        "sale_count": 8,
+        "average_price": 5.00
+      }
+    ],
+    "summary": {
+      "total_medicines_sold": 2,
+      "total_quantity_sold": 40,
+      "total_revenue": 137.50,
+      "total_sales": 20
+    }
+  }
+}
+```
+
+**Note:**
+- Only completed sales are included in the report
+- Results are sorted by total quantity sold (descending)
+- Summary provides aggregate statistics
+
+---
+
+## Complete Workflow Example
+
+### Payment Request Flow: Pharmacist → Cashier
+
+This section demonstrates the complete workflow from pharmacist creating a sale to cashier processing payment.
+
+#### Step 1: Pharmacist Creates Sale
+
+**Endpoint:** `POST {{base_url}}/api/pharmacist/sales`
+
+**Request:**
+```json
+{
+  "items": [
+    {
+      "medicine_id": 5,
+      "quantity": 2
+    }
+  ],
+  "payment_type": "cash",
+  "customer_name": "John Doe"
+}
+```
+
+**Result:**
+- Sale created with `status: "pending_payment"`
+- Stock is NOT updated yet
+- Notification automatically created for cashiers
+- Returns `sale_id` (e.g., 100)
+
+#### Step 2: Cashier Views Notifications
+
+**Endpoint:** `GET {{base_url}}/api/cashier/notifications`
+
+**Result:**
+- Shows notification with pharmacist name and sale ID
+- Example: "Pharmacist John Pharmacist sent a payment request (Sale ID: 100) for: Paracetamol"
+
+#### Step 3: Cashier Views Pending Payments
+
+**Endpoint:** `GET {{base_url}}/api/cashier/payments/pending`
+
+**Result:**
+- Lists all pending payment requests
+- Shows sale_id, total_amount, pharmacist_name, item_count
+
+#### Step 4: Cashier Gets Payment Details
+
+**Endpoint:** `GET {{base_url}}/api/cashier/payments/100`
+
+**Result:**
+- Shows complete sale details with all items
+- Displays medicine names, quantities, prices
+
+#### Step 5: Cashier Accepts Payment
+
+**Endpoint:** `POST {{base_url}}/api/cashier/payments/100/accept`
+
+**Request:**
+```json
+{
+  "payment_type": "cash",
+  "reference_number": null
+}
+```
+
+**Result:**
+- Sale status changes to `"completed"`
+- **Stock is updated** (quantity reduced)
+- Notification is marked as read
+- Payment record is created
+- Returns receipt details
+
+#### Step 6: View Sold Medicines Report
+
+**Endpoint:** `GET {{base_url}}/api/cashier/reports/sold-medicines`
+
+**Result:**
+- Shows the sold medicine in the report
+- Displays total quantity sold, revenue, etc.
 
 ---
 

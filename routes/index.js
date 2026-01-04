@@ -120,6 +120,10 @@ router.get('/cashier/receipts/:sale_id', authMiddleware, requirePasswordChange, 
 
 // 2. Payment Reports
 router.get('/cashier/reports/payments', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getPaymentReports);
+router.get('/cashier/reports/sold-medicines', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getSoldMedicinesReport);
+
+// 3. Notifications
+router.get('/cashier/notifications', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getNotifications);
 
 // 3. Return Management
 router.get('/cashier/returns/sales', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getSalesForReturn);
