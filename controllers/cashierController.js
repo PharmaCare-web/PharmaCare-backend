@@ -451,6 +451,7 @@ const processReturn = async (req, res, next) => {
       });
     }
 
+    let returnId; // Declare returnId outside transaction block so it's accessible after commit
     const connection = await pool.getConnection();
     await connection.beginTransaction();
 
@@ -500,7 +501,7 @@ const processReturn = async (req, res, next) => {
         [sale_id, medicine_id, quantity_returned, return_reason, return_condition || 'good']
       );
 
-      const returnId = returnResult.length > 0 ? (returnResult[0].return_id || returnResult[0].id) : null;
+      returnId = returnResult.length > 0 ? (returnResult[0].return_id || returnResult[0].id) : null;
       if (!returnId) {
         throw new Error('Failed to create return record');
       }
