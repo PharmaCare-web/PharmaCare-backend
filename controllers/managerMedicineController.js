@@ -507,11 +507,274 @@ const removeMedicineFromStock = async (req, res, next) => {
   }
 };
 
+// Search medicines by name, barcode, manufacturer, or category
+const searchMedicines = async (req, res, next) => {
+  try {
+    const managerBranchId = req.user.branch_id;
+    const searchQuery = req.query.q || req.query.search;
+
+    if (!searchQuery || searchQuery.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Search query is required. Use query parameter "q" or "search".'
+      });
+    }
+
+    const searchTerm = `%${searchQuery.trim()}%`;
+
+    const [medicines] = await pool.execute(
+      `SELECT 
+        m.medicine_id,
+        m.name,
+        m.type,
+        m.quantity_in_stock,
+        m.price,
+        m.expiry_date,
+        m.barcode,
+        m.manufacturer,
+        c.category_id,
+        c.category_name,
+        c.description as category_description,
+        CASE 
+          WHEN m.quantity_in_stock < 10 THEN 'low_stock'
+          WHEN m.expiry_date < CURRENT_DATE THEN 'expired'
+          WHEN m.expiry_date < CURRENT_DATE + INTERVAL '30 days' THEN 'expiring_soon'
+          ELSE 'normal'
+        END as stock_status
+      FROM medicine m
+      LEFT JOIN category c ON m.category_id = c.category_id
+      WHERE m.branch_id = ?
+      AND (
+        m.name LIKE ? OR
+        m.barcode LIKE ? OR
+        c.category_name LIKE ? OR
+        m.manufacturer LIKE ?
+      )
+      ORDER BY m.name ASC`,
+      [managerBranchId, searchTerm, searchTerm, searchTerm, searchTerm]
+    );
+
+    res.json({
+      success: true,
+      data: medicines,
+      message: 'Search completed successfully',
+      count: medicines.length,
+      searchQuery: searchQuery
+    });
+  } catch (error) {
+    console.error('Search medicines error:', error);
+    next(error);
+  }
+};
+
+// Get medicines by category
+const getMedicinesByCategory = async (req, res, next) => {
+  try {
+    const managerBranchId = req.user.branch_id;
+    const { category_id } = req.params;
+
+    const [medicines] = await pool.execute(
+      `SELECT 
+        m.medicine_id,
+        m.name,
+        m.type,
+        m.quantity_in_stock,
+        m.price,
+        m.expiry_date,
+        m.barcode,
+        m.manufacturer,
+        c.category_id,
+        c.category_name,
+        c.description as category_description,
+        CASE 
+          WHEN m.quantity_in_stock < 10 THEN 'low_stock'
+          WHEN m.expiry_date < CURRENT_DATE THEN 'expired'
+          WHEN m.expiry_date < CURRENT_DATE + INTERVAL '30 days' THEN 'expiring_soon'
+          ELSE 'normal'
+        END as stock_status
+      FROM medicine m
+      LEFT JOIN category c ON m.category_id = c.category_id
+      WHERE m.branch_id = ? AND m.category_id = ?
+      ORDER BY m.name ASC`,
+      [managerBranchId, category_id]
+    );
+
+    res.json({
+      success: true,
+      data: medicines,
+      message: 'Medicines by category retrieved successfully',
+      count: medicines.length,
+      category_id: parseInt(category_id)
+    });
+  } catch (error) {
+    console.error('Get medicines by category error:', error);
+    next(error);
+  }
+};
+
+// Get sold items history (for frontend table display)
+const getSoldItemsHistory = async (req, res, next) => {
+  try {
+    const managerBranchId = req.user.branch_id;
+    const { 
+      start_date, 
+      end_date, 
+      medicine_id, 
+      category_id,
+      pharmacist_id,
+      page = 1, 
+      limit = 50 
+    } = req.query;
+
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 50;
+    const offset = (pageNum - 1) * limitNum;
+
+    // Try users table first (production), fallback to "user" if needed
+    let query;
+    try {
+      // Test if users table exists
+      await pool.execute('SELECT 1 FROM users LIMIT 1');
+      query = `
+        SELECT 
+          si.sale_item_id,
+          si.sale_id,
+          si.medicine_id,
+          si.quantity,
+          si.unit_price,
+          si.subtotal,
+          si.created_at as sold_date,
+          m.name as medicine_name,
+          m.barcode,
+          m.type as medicine_type,
+          c.category_id,
+          c.category_name,
+          s.sale_date,
+          s.total_amount as sale_total,
+          s.status as sale_status,
+          u.full_name as pharmacist_name,
+          u.user_id as pharmacist_id
+        FROM sale_item si
+        INNER JOIN sale s ON si.sale_id = s.sale_id
+        INNER JOIN medicine m ON si.medicine_id = m.medicine_id
+        LEFT JOIN category c ON m.category_id = c.category_id
+        LEFT JOIN users u ON s.user_id = u.user_id
+        WHERE s.branch_id = ?
+          AND s.status = 'completed'
+      `;
+    } catch (error) {
+      // Fallback to "user" table
+      query = `
+        SELECT 
+          si.sale_item_id,
+          si.sale_id,
+          si.medicine_id,
+          si.quantity,
+          si.unit_price,
+          si.subtotal,
+          si.created_at as sold_date,
+          m.name as medicine_name,
+          m.barcode,
+          m.type as medicine_type,
+          c.category_id,
+          c.category_name,
+          s.sale_date,
+          s.total_amount as sale_total,
+          s.status as sale_status,
+          u.full_name as pharmacist_name,
+          u.user_id as pharmacist_id
+        FROM sale_item si
+        INNER JOIN sale s ON si.sale_id = s.sale_id
+        INNER JOIN medicine m ON si.medicine_id = m.medicine_id
+        LEFT JOIN category c ON m.category_id = c.category_id
+        LEFT JOIN "user" u ON s.user_id = u.user_id
+        WHERE s.branch_id = ?
+          AND s.status = 'completed'
+      `;
+    }
+
+    const params = [managerBranchId];
+
+    // Add filters
+    if (start_date) {
+      query += ` AND DATE(s.sale_date) >= ?`;
+      params.push(start_date);
+    }
+
+    if (end_date) {
+      query += ` AND DATE(s.sale_date) <= ?`;
+      params.push(end_date);
+    }
+
+    if (medicine_id) {
+      query += ` AND m.medicine_id = ?`;
+      params.push(medicine_id);
+    }
+
+    if (category_id) {
+      query += ` AND m.category_id = ?`;
+      params.push(category_id);
+    }
+
+    if (pharmacist_id) {
+      query += ` AND s.user_id = ?`;
+      params.push(pharmacist_id);
+    }
+
+    // Get total count for pagination
+    let countQuery = query.replace(
+      /SELECT[\s\S]*?FROM/,
+      'SELECT COUNT(*) as total FROM'
+    ).replace(/ORDER BY[\s\S]*$/, '');
+
+    const [countResult] = await pool.execute(countQuery, params);
+    const total = countResult[0].total;
+
+    // Add ordering and pagination
+    query += ` ORDER BY s.sale_date DESC, si.sale_item_id DESC LIMIT ${limitNum} OFFSET ${offset}`;
+
+    const [soldItems] = await pool.execute(query, params);
+
+    // Calculate summary statistics
+    const totalQuantity = soldItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+    const totalRevenue = soldItems.reduce((sum, item) => sum + parseFloat(item.subtotal || 0), 0);
+    const uniqueMedicines = new Set(soldItems.map(item => item.medicine_id)).size;
+    const uniqueSales = new Set(soldItems.map(item => item.sale_id)).size;
+
+    res.json({
+      success: true,
+      message: 'Sold items history retrieved successfully',
+      data: {
+        items: soldItems,
+        summary: {
+          total_items: parseInt(total),
+          total_quantity_sold: totalQuantity,
+          total_revenue: totalRevenue,
+          unique_medicines: uniqueMedicines,
+          unique_sales: uniqueSales
+        },
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: parseInt(total),
+          totalPages: Math.ceil(total / limitNum)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get sold items history error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getAllMedicines,
   getMedicineById,
   addMedicineToStock,
   updateMedicineStock,
-  removeMedicineFromStock
+  removeMedicineFromStock,
+  searchMedicines,
+  getMedicinesByCategory,
+  getSoldItemsHistory
 };
 

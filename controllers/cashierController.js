@@ -933,6 +933,201 @@ const getSoldMedicinesReport = async (req, res, next) => {
   }
 };
 
+// ============================================================================
+// 6. DASHBOARD
+// ============================================================================
+
+// Get cashier dashboard summary
+const getDashboard = async (req, res, next) => {
+  try {
+    const branchId = req.cashier.branch_id;
+    const cashierId = req.cashier.user_id;
+
+    // Get pending payment requests count
+    // Try users table first (production), fallback to "user" if needed
+    let pendingPayments;
+    try {
+      [pendingPayments] = await pool.execute(
+        `SELECT COUNT(*) as count
+         FROM sale s
+         INNER JOIN users u ON s.user_id = u.user_id
+         INNER JOIN role r ON u.role_id = r.role_id
+         WHERE s.branch_id = ? 
+           AND s.status = 'pending_payment'
+           AND r.role_name = 'Pharmacist'`,
+        [branchId]
+      );
+    } catch (userTableError) {
+      if (userTableError.code === '42P01') { // relation "users" does not exist
+        [pendingPayments] = await pool.execute(
+          `SELECT COUNT(*) as count
+           FROM sale s
+           INNER JOIN "user" u ON s.user_id = u.user_id
+           INNER JOIN role r ON u.role_id = r.role_id
+           WHERE s.branch_id = ? 
+             AND s.status = 'pending_payment'
+             AND r.role_name = 'Pharmacist'`,
+          [branchId]
+        );
+      } else {
+        throw userTableError;
+      }
+    }
+
+    // Get today's completed payments processed by this cashier
+    const [todayPayments] = await pool.execute(
+      `SELECT 
+        COUNT(*) as count,
+        COALESCE(SUM(p.amount), 0) as total_revenue
+      FROM payment p
+      INNER JOIN sale s ON p.sale_id = s.sale_id
+      WHERE s.branch_id = ?
+        AND p.payment_date::date = CURRENT_DATE
+        AND EXISTS (
+          SELECT 1 FROM sale s2 
+          WHERE s2.sale_id = p.sale_id 
+          AND s2.status = 'completed'
+        )`,
+      [branchId]
+    );
+
+    // Get today's completed sales count
+    const [todaySales] = await pool.execute(
+      `SELECT COUNT(*) as count
+       FROM sale
+       WHERE branch_id = ?
+         AND sale_date::date = CURRENT_DATE
+         AND status = 'completed'`,
+      [branchId]
+    );
+
+    // Get this week's revenue
+    const [weekRevenue] = await pool.execute(
+      `SELECT 
+        COUNT(*) as count,
+        COALESCE(SUM(p.amount), 0) as total_revenue
+      FROM payment p
+      INNER JOIN sale s ON p.sale_id = s.sale_id
+      WHERE s.branch_id = ?
+        AND EXTRACT(YEAR FROM p.payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(WEEK FROM p.payment_date) = EXTRACT(WEEK FROM CURRENT_DATE)
+        AND s.status = 'completed'`,
+      [branchId]
+    );
+
+    // Get this month's revenue
+    const [monthRevenue] = await pool.execute(
+      `SELECT 
+        COUNT(*) as count,
+        COALESCE(SUM(p.amount), 0) as total_revenue
+      FROM payment p
+      INNER JOIN sale s ON p.sale_id = s.sale_id
+      WHERE s.branch_id = ?
+        AND EXTRACT(YEAR FROM p.payment_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM p.payment_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+        AND s.status = 'completed'`,
+      [branchId]
+    );
+
+    // Get unread notifications count
+    const [unreadNotifications] = await pool.execute(
+      `SELECT COUNT(*) as count
+       FROM notification
+       WHERE branch_id = ?
+         AND type = 'payment_request'
+         AND is_read = FALSE`,
+      [branchId]
+    );
+
+    // Get recent returns (last 5)
+    const [recentReturns] = await pool.execute(
+      `SELECT 
+        rt.return_id,
+        rt.sale_id,
+        rt.medicine_id,
+        rt.quantity_returned,
+        rt.return_reason,
+        rt.return_date,
+        m.name as medicine_name
+      FROM return_table rt
+      INNER JOIN sale s ON rt.sale_id = s.sale_id
+      INNER JOIN medicine m ON rt.medicine_id = m.medicine_id
+      WHERE s.branch_id = ?
+        AND rt.status = 'completed'
+      ORDER BY rt.return_date DESC
+      LIMIT 5`,
+      [branchId]
+    );
+
+    // Get recent completed sales (last 5)
+    const [recentSales] = await pool.execute(
+      `SELECT 
+        s.sale_id,
+        s.sale_date,
+        s.total_amount,
+        p.payment_type,
+        p.amount as payment_amount,
+        COUNT(si.sale_item_id) as item_count
+      FROM sale s
+      LEFT JOIN payment p ON s.sale_id = p.sale_id
+      LEFT JOIN sale_item si ON s.sale_id = si.sale_id
+      WHERE s.branch_id = ?
+        AND s.status = 'completed'
+      GROUP BY s.sale_id, s.sale_date, s.total_amount, p.payment_type, p.amount
+      ORDER BY s.sale_date DESC
+      LIMIT 5`,
+      [branchId]
+    );
+
+    // Get today's returns count
+    const [todayReturns] = await pool.execute(
+      `SELECT COUNT(*) as count
+       FROM return_table rt
+       INNER JOIN sale s ON rt.sale_id = s.sale_id
+       WHERE s.branch_id = ?
+         AND rt.return_date::date = CURRENT_DATE
+         AND rt.status = 'completed'`,
+      [branchId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Cashier dashboard retrieved successfully',
+      data: {
+        payments: {
+          pendingRequests: parseInt(pendingPayments[0].count) || 0,
+          today: {
+            count: parseInt(todayPayments[0].count) || 0,
+            revenue: parseFloat(todayPayments[0].total_revenue) || 0
+          },
+          thisWeek: {
+            count: parseInt(weekRevenue[0].count) || 0,
+            revenue: parseFloat(weekRevenue[0].total_revenue) || 0
+          },
+          thisMonth: {
+            count: parseInt(monthRevenue[0].count) || 0,
+            revenue: parseFloat(monthRevenue[0].total_revenue) || 0
+          }
+        },
+        sales: {
+          completedToday: parseInt(todaySales[0].count) || 0,
+          recentSales: recentSales
+        },
+        returns: {
+          today: parseInt(todayReturns[0].count) || 0,
+          recentReturns: recentReturns
+        },
+        notifications: {
+          unreadCount: parseInt(unreadNotifications[0].count) || 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get cashier dashboard error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   // Payment Management
   getPendingPayments,
@@ -950,6 +1145,8 @@ module.exports = {
   // Notifications
   getNotifications,
   // Sold Medicines Report
-  getSoldMedicinesReport
+  getSoldMedicinesReport,
+  // Dashboard
+  getDashboard
 };
 

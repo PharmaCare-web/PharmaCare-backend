@@ -74,10 +74,13 @@ router.post('/manager/staff/:user_id/reset-password', authMiddleware, managerAut
 
 // Manager Medicine Management Routes (Manager only - view and manage medicines)
 router.get('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.getAllMedicines);
+router.get('/manager/medicines/search', authMiddleware, managerAuth, managerMedicineController.searchMedicines);
+router.get('/manager/medicines/category/:category_id', authMiddleware, managerAuth, managerMedicineController.getMedicinesByCategory);
 router.get('/manager/medicines/:medicine_id', authMiddleware, managerAuth, managerMedicineController.getMedicineById);
 router.post('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.addMedicineToStock);
 router.put('/manager/medicines/:medicine_id/stock', authMiddleware, managerAuth, managerMedicineController.updateMedicineStock);
 router.delete('/manager/medicines/:medicine_id', authMiddleware, managerAuth, managerMedicineController.removeMedicineFromStock);
+router.get('/manager/medicines/sold-items/history', authMiddleware, managerAuth, managerMedicineController.getSoldItemsHistory);
 
 // ============================================================================
 // PHARMACIST ROUTES (Pharmacist only - view medicines, inventory, sales, reports)
@@ -108,6 +111,12 @@ router.get('/pharmacist/reports/low-stock', authMiddleware, requirePasswordChang
 router.get('/pharmacist/reports/expiry', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getExpiryReport);
 router.get('/pharmacist/reports/inventory-summary', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getInventorySummary);
 
+// 5. Dashboard
+router.get('/pharmacist/dashboard', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getDashboard);
+
+// 6. Sold Items History
+router.get('/pharmacist/medicines/sold-items/history', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getSoldItemsHistory);
+
 // ============================================================================
 // CASHIER ROUTES (Cashier only - payment acceptance, receipts, returns, reports)
 // ============================================================================
@@ -131,6 +140,9 @@ router.get('/cashier/returns/receipt/:receipt_number', authMiddleware, requirePa
 router.get('/cashier/returns/sales/:sale_id/items', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getSaleItemsForReturn);
 router.post('/cashier/returns', authMiddleware, requirePasswordChange, cashierAuth, cashierController.processReturn);
 router.get('/cashier/reports/returns', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getReturnReports);
+
+// 4. Dashboard
+router.get('/cashier/dashboard', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getDashboard);
 
 // Protected user routes (require authentication)
 router.get('/users', authMiddleware, userController.getAllUsers);

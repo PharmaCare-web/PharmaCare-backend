@@ -530,18 +530,392 @@ Run these in order for a complete test:
 
 ---
 
+## 🔍 MEDICINE MANAGEMENT
+
+### Test 13: Search Medicines by Category (Pharmacist)
+
+**Endpoint:** `GET {{base_url}}/api/pharmacist/medicines/category/:category_id`
+
+**Headers:**
+```
+Authorization: Bearer {{pharmacist_token}}
+```
+
+**Example:**
+```
+GET {{base_url}}/api/pharmacist/medicines/category/1
+```
+
+**Expected:** 200 OK
+- List of medicines in the specified category
+- Includes category information
+
+**Verify:**
+- ✅ All medicines belong to the category
+- ✅ Medicines are from pharmacist's branch
+
+---
+
+### Test 14: Search Medicines (Pharmacist)
+
+**Endpoint:** `GET {{base_url}}/api/pharmacist/medicines/search?q=aspirin`
+
+**Headers:**
+```
+Authorization: Bearer {{pharmacist_token}}
+```
+
+**Query Parameters:**
+- `q` or `search`: Search term (name, barcode, category, manufacturer)
+
+**Expected:** 200 OK
+- List of matching medicines
+
+---
+
+### Test 15: Add Medicine (Pharmacist)
+
+**Endpoint:** `POST {{base_url}}/api/pharmacist/medicines`
+
+**Headers:**
+```
+Authorization: Bearer {{pharmacist_token}}
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "name": "New Medicine",
+  "category_id": 1,
+  "price": 25.50,
+  "quantity_in_stock": 100,
+  "type": "Tablet",
+  "barcode": "123456789",
+  "manufacturer": "Pharma Co",
+  "expiry_date": "2025-12-31"
+}
+```
+
+**Expected:** 201 Created
+- Medicine added to stock
+- Returns created medicine details
+
+**Verify:**
+- ✅ Medicine appears in medicine list
+- ✅ Stock quantity is correct
+
+---
+
+### Test 16: Update Medicine Stock (Pharmacist)
+
+**Endpoint:** `PUT {{base_url}}/api/pharmacist/medicines/:medicine_id/stock`
+
+**Headers:**
+```
+Authorization: Bearer {{pharmacist_token}}
+Content-Type: application/json
+```
+
+**Body (Absolute Quantity):**
+```json
+{
+  "quantity_in_stock": 150
+}
+```
+
+**Body (Relative Change):**
+```json
+{
+  "action": "add",
+  "quantity_change": 50
+}
+```
+
+**Expected:** 200 OK
+- Stock updated successfully
+
+**Verify:**
+- ✅ Stock quantity updated correctly
+
+---
+
+### Test 17: Delete Medicine (Pharmacist)
+
+**Endpoint:** `DELETE {{base_url}}/api/pharmacist/medicines/:medicine_id`
+
+**Headers:**
+```
+Authorization: Bearer {{pharmacist_token}}
+```
+
+**Expected:** 200 OK
+- Medicine removed from stock
+
+**Verify:**
+- ✅ Medicine no longer appears in list
+
+---
+
+### Test 18: Search Medicines by Category (Manager)
+
+**Endpoint:** `GET {{base_url}}/api/manager/medicines/category/:category_id`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+```
+
+**Example:**
+```
+GET {{base_url}}/api/manager/medicines/category/1
+```
+
+**Expected:** 200 OK
+- List of medicines in the specified category
+
+---
+
+### Test 19: Search Medicines (Manager)
+
+**Endpoint:** `GET {{base_url}}/api/manager/medicines/search?q=aspirin`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+```
+
+**Query Parameters:**
+- `q` or `search`: Search term
+
+**Expected:** 200 OK
+- List of matching medicines
+
+---
+
+### Test 20: Add Medicine (Manager)
+
+**Endpoint:** `POST {{base_url}}/api/manager/medicines`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "name": "New Medicine",
+  "category_id": 1,
+  "price": 25.50,
+  "quantity_in_stock": 100,
+  "type": "Tablet",
+  "barcode": "123456789",
+  "manufacturer": "Pharma Co",
+  "expiry_date": "2025-12-31"
+}
+```
+
+**Expected:** 201 Created
+- Medicine added to stock
+
+---
+
+### Test 21: Update Medicine Stock (Manager)
+
+**Endpoint:** `PUT {{base_url}}/api/manager/medicines/:medicine_id/stock`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "quantity_in_stock": 150,
+  "price": 26.00
+}
+```
+
+**Expected:** 200 OK
+- Stock and/or price updated
+
+---
+
+### Test 22: Delete Medicine (Manager)
+
+**Endpoint:** `DELETE {{base_url}}/api/manager/medicines/:medicine_id`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+```
+
+**Expected:** 200 OK
+- Medicine removed from stock
+
+---
+
+## 📈 SOLD ITEMS HISTORY
+
+### Test 23: Get Sold Items History (Pharmacist)
+
+**Endpoint:** `GET {{base_url}}/api/pharmacist/medicines/sold-items/history`
+
+**Headers:**
+```
+Authorization: Bearer {{pharmacist_token}}
+```
+
+**Query Parameters:**
+- `start_date` (optional): Start date filter (YYYY-MM-DD)
+- `end_date` (optional): End date filter (YYYY-MM-DD)
+- `medicine_id` (optional): Filter by medicine ID
+- `category_id` (optional): Filter by category ID
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 50)
+
+**Example:**
+```
+GET {{base_url}}/api/pharmacist/medicines/sold-items/history?start_date=2024-01-01&end_date=2024-12-31&page=1&limit=50
+```
+
+**Expected:** 200 OK
+- List of sold items with details
+- Summary statistics
+- Pagination information
+
+**Response Structure:**
+```json
+{
+  "success": true,
+  "message": "Sold items history retrieved successfully",
+  "data": {
+    "items": [
+      {
+        "sale_item_id": 1,
+        "sale_id": 5,
+        "medicine_id": 2,
+        "quantity": 2,
+        "unit_price": 10.50,
+        "subtotal": 21.00,
+        "sold_date": "2024-01-15T10:30:00Z",
+        "medicine_name": "Aspirin",
+        "barcode": "123456",
+        "medicine_type": "Tablet",
+        "category_id": 1,
+        "category_name": "Pain Relief",
+        "sale_date": "2024-01-15T10:30:00Z",
+        "sale_total": 21.00,
+        "sale_status": "completed",
+        "pharmacist_name": "John Doe"
+      }
+    ],
+    "summary": {
+      "total_items": 100,
+      "total_quantity_sold": 250,
+      "total_revenue": 5250.00,
+      "unique_medicines": 15,
+      "unique_sales": 50
+    },
+    "pagination": {
+      "page": 1,
+      "limit": 50,
+      "total": 100,
+      "totalPages": 2
+    }
+  }
+}
+```
+
+**Verify:**
+- ✅ Items are from pharmacist's sales only
+- ✅ All sales have status "completed"
+- ✅ Summary statistics are accurate
+- ✅ Pagination works correctly
+
+---
+
+### Test 24: Get Sold Items History (Manager)
+
+**Endpoint:** `GET {{base_url}}/api/manager/medicines/sold-items/history`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+```
+
+**Query Parameters:**
+- `start_date` (optional): Start date filter (YYYY-MM-DD)
+- `end_date` (optional): End date filter (YYYY-MM-DD)
+- `medicine_id` (optional): Filter by medicine ID
+- `category_id` (optional): Filter by category ID
+- `pharmacist_id` (optional): Filter by pharmacist ID
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 50)
+
+**Example:**
+```
+GET {{base_url}}/api/manager/medicines/sold-items/history?start_date=2024-01-01&pharmacist_id=5&page=1&limit=50
+```
+
+**Expected:** 200 OK
+- List of all sold items from manager's branch
+- Can filter by pharmacist
+- Summary statistics
+- Pagination information
+
+**Verify:**
+- ✅ Items are from manager's branch
+- ✅ Can filter by pharmacist
+- ✅ Summary includes all pharmacists' sales
+
+---
+
 ## 🔗 Related Endpoints
 
 ### Pharmacist Endpoints
 - `GET /api/pharmacist/medicines` - View all medicines
+- `GET /api/pharmacist/medicines/search` - Search medicines
+- `GET /api/pharmacist/medicines/category/:category_id` - Get medicines by category
+- `GET /api/pharmacist/medicines/:medicine_id` - Get medicine by ID
+- `POST /api/pharmacist/medicines` - Add medicine to stock
+- `PUT /api/pharmacist/medicines/:medicine_id/stock` - Update medicine stock
+- `DELETE /api/pharmacist/medicines/:medicine_id` - Delete medicine
+- `GET /api/pharmacist/medicines/sold-items/history` - Sold items history
+- `GET /api/pharmacist/dashboard` - Dashboard summary
 - `GET /api/pharmacist/reports/inventory-summary` - Inventory summary
 - `GET /api/pharmacist/reports/low-stock` - Low stock report
+- `GET /api/pharmacist/reports/expiry` - Expiry report
+- `POST /api/pharmacist/sales` - Create sale
+- `GET /api/pharmacist/sales/:sale_id` - Get sale details
+
+### Manager Endpoints
+- `GET /api/manager/medicines` - View all medicines
+- `GET /api/manager/medicines/search` - Search medicines
+- `GET /api/manager/medicines/category/:category_id` - Get medicines by category
+- `GET /api/manager/medicines/:medicine_id` - Get medicine by ID
+- `POST /api/manager/medicines` - Add medicine to stock
+- `PUT /api/manager/medicines/:medicine_id/stock` - Update medicine stock
+- `DELETE /api/manager/medicines/:medicine_id` - Delete medicine
+- `GET /api/manager/medicines/sold-items/history` - Sold items history
 
 ### Cashier Endpoints
 - `GET /api/cashier/notifications` - View notifications
 - `GET /api/cashier/payments/pending` - Pending payments
+- `GET /api/cashier/payments/:sale_id` - Payment request details
+- `POST /api/cashier/payments/:sale_id/accept` - Accept payment
+- `GET /api/cashier/receipts/:sale_id` - Get receipt
+- `GET /api/cashier/dashboard` - Dashboard summary
 - `GET /api/cashier/reports/sold-medicines` - Sold medicines report
 - `GET /api/cashier/reports/returns` - Return reports
+- `GET /api/cashier/returns/sales` - Get sales for return
+- `GET /api/cashier/returns/receipt/:receipt_number` - Find sale by receipt
+- `GET /api/cashier/returns/sales/:sale_id/items` - Get sale items for return
+- `POST /api/cashier/returns` - Process return
 
 ---
 

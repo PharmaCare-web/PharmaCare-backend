@@ -891,6 +891,311 @@ const getInventorySummary = async (req, res, next) => {
   }
 };
 
+// ============================================================================
+// 5. DASHBOARD
+// ============================================================================
+
+// Get pharmacist dashboard summary
+const getDashboard = async (req, res, next) => {
+  try {
+    const branchId = req.users.branch_id;
+    const pharmacistId = req.users.user_id;
+
+    // Get today's sales created by this pharmacist
+    const [todaySales] = await pool.execute(
+      `SELECT 
+        COUNT(*) as count,
+        COALESCE(SUM(total_amount), 0) as total_revenue
+      FROM sale
+      WHERE branch_id = ? 
+        AND user_id = ?
+        AND sale_date::date = CURRENT_DATE`,
+      [branchId, pharmacistId]
+    );
+
+    // Get pending payment requests (sales waiting for cashier)
+    const [pendingPayments] = await pool.execute(
+      `SELECT COUNT(*) as count
+       FROM sale
+       WHERE branch_id = ? 
+         AND user_id = ?
+         AND status = 'pending_payment'`,
+      [branchId, pharmacistId]
+    );
+
+    // Get completed sales today
+    const [completedToday] = await pool.execute(
+      `SELECT COUNT(*) as count
+       FROM sale
+       WHERE branch_id = ? 
+         AND user_id = ?
+         AND sale_date::date = CURRENT_DATE
+         AND status = 'completed'`,
+      [branchId, pharmacistId]
+    );
+
+    // Get this week's sales
+    const [weekSales] = await pool.execute(
+      `SELECT 
+        COUNT(*) as count,
+        COALESCE(SUM(total_amount), 0) as total_revenue
+      FROM sale
+      WHERE branch_id = ? 
+        AND user_id = ?
+        AND EXTRACT(YEAR FROM sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(WEEK FROM sale_date) = EXTRACT(WEEK FROM CURRENT_DATE)
+        AND status = 'completed'`,
+      [branchId, pharmacistId]
+    );
+
+    // Get this month's sales
+    const [monthSales] = await pool.execute(
+      `SELECT 
+        COUNT(*) as count,
+        COALESCE(SUM(total_amount), 0) as total_revenue
+      FROM sale
+      WHERE branch_id = ? 
+        AND user_id = ?
+        AND EXTRACT(YEAR FROM sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM sale_date) = EXTRACT(MONTH FROM CURRENT_DATE)
+        AND status = 'completed'`,
+      [branchId, pharmacistId]
+    );
+
+    // Get low stock medicines
+    const [lowStock] = await pool.execute(
+      `SELECT medicine_id, name, quantity_in_stock, price
+       FROM medicine
+       WHERE branch_id = ?
+         AND quantity_in_stock <= 10
+       ORDER BY quantity_in_stock ASC
+       LIMIT 10`,
+      [branchId]
+    );
+
+    // Get expiring medicines (next 30 days)
+    const [expiringMedicines] = await pool.execute(
+      `SELECT medicine_id, name, expiry_date, quantity_in_stock
+       FROM medicine
+       WHERE branch_id = ?
+         AND expiry_date IS NOT NULL
+         AND expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+         AND expiry_date >= CURRENT_DATE
+       ORDER BY expiry_date ASC
+       LIMIT 10`,
+      [branchId]
+    );
+
+    // Get recent sales (last 5)
+    const [recentSales] = await pool.execute(
+      `SELECT 
+        s.sale_id,
+        s.sale_date,
+        s.total_amount,
+        s.status,
+        COUNT(si.sale_item_id) as item_count
+      FROM sale s
+      LEFT JOIN sale_item si ON s.sale_id = si.sale_id
+      WHERE s.branch_id = ? 
+        AND s.user_id = ?
+      GROUP BY s.sale_id, s.sale_date, s.total_amount, s.status
+      ORDER BY s.sale_date DESC
+      LIMIT 5`,
+      [branchId, pharmacistId]
+    );
+
+    // Get inventory summary
+    const [inventorySummary] = await pool.execute(
+      `SELECT 
+        COUNT(*) as total_medicines,
+        SUM(quantity_in_stock) as total_quantity,
+        COUNT(CASE WHEN quantity_in_stock <= 10 THEN 1 END) as low_stock_count,
+        COUNT(CASE WHEN expiry_date IS NOT NULL AND expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 1 END) as expiring_soon_count
+      FROM medicine
+      WHERE branch_id = ?`,
+      [branchId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Pharmacist dashboard retrieved successfully',
+      data: {
+        sales: {
+          today: {
+            count: parseInt(todaySales[0].count) || 0,
+            revenue: parseFloat(todaySales[0].total_revenue) || 0
+          },
+          thisWeek: {
+            count: parseInt(weekSales[0].count) || 0,
+            revenue: parseFloat(weekSales[0].total_revenue) || 0
+          },
+          thisMonth: {
+            count: parseInt(monthSales[0].count) || 0,
+            revenue: parseFloat(monthSales[0].total_revenue) || 0
+          },
+          pendingPayments: parseInt(pendingPayments[0].count) || 0,
+          completedToday: parseInt(completedToday[0].count) || 0,
+          recentSales: recentSales
+        },
+        inventory: {
+          summary: {
+            totalMedicines: parseInt(inventorySummary[0].total_medicines) || 0,
+            totalQuantity: parseInt(inventorySummary[0].total_quantity) || 0,
+            lowStockCount: parseInt(inventorySummary[0].low_stock_count) || 0,
+            expiringSoonCount: parseInt(inventorySummary[0].expiring_soon_count) || 0
+          },
+          lowStockMedicines: lowStock,
+          expiringMedicines: expiringMedicines
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get pharmacist dashboard error:', error);
+    next(error);
+  }
+};
+
+// ============================================================================
+// 6. SOLD ITEMS HISTORY
+// ============================================================================
+
+// Get sold items history (for frontend table display)
+const getSoldItemsHistory = async (req, res, next) => {
+  try {
+    const branchId = req.users.branch_id;
+    const pharmacistId = req.users.user_id;
+    const { 
+      start_date, 
+      end_date, 
+      medicine_id, 
+      category_id,
+      page = 1, 
+      limit = 50 
+    } = req.query;
+
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 50;
+    const offset = (pageNum - 1) * limitNum;
+
+    let baseQuery = `
+      SELECT 
+        si.sale_item_id,
+        si.sale_id,
+        si.medicine_id,
+        si.quantity,
+        si.unit_price,
+        si.subtotal,
+        si.created_at as sold_date,
+        m.name as medicine_name,
+        m.barcode,
+        m.type as medicine_type,
+        c.category_id,
+        c.category_name,
+        s.sale_date,
+        s.total_amount as sale_total,
+        s.status as sale_status,
+        u.full_name as pharmacist_name
+      FROM sale_item si
+      INNER JOIN sale s ON si.sale_id = s.sale_id
+      INNER JOIN medicine m ON si.medicine_id = m.medicine_id
+      LEFT JOIN category c ON m.category_id = c.category_id
+      LEFT JOIN users u ON s.user_id = u.user_id
+      WHERE s.branch_id = ?
+        AND s.user_id = ?
+        AND s.status = 'completed'
+    `;
+
+    const params = [branchId, pharmacistId];
+
+    // Add filters
+    if (start_date) {
+      baseQuery += ` AND DATE(s.sale_date) >= ?`;
+      params.push(start_date);
+    }
+
+    if (end_date) {
+      baseQuery += ` AND DATE(s.sale_date) <= ?`;
+      params.push(end_date);
+    }
+
+    if (medicine_id) {
+      baseQuery += ` AND m.medicine_id = ?`;
+      params.push(medicine_id);
+    }
+
+    if (category_id) {
+      baseQuery += ` AND m.category_id = ?`;
+      params.push(category_id);
+    }
+
+    // Get total count for pagination
+    let countQuery = baseQuery.replace(
+      /SELECT[\s\S]*?FROM/,
+      'SELECT COUNT(*) as total FROM'
+    ).replace(/ORDER BY[\s\S]*$/, '');
+
+    // Try users table first, fallback to "user" if needed
+    let countResult, soldItems;
+    try {
+      [countResult] = await pool.execute(countQuery, params);
+      const total = countResult[0].total;
+
+      // Add ordering and pagination
+      const dataQuery = baseQuery + ` ORDER BY s.sale_date DESC, si.sale_item_id DESC LIMIT ${limitNum} OFFSET ${offset}`;
+      [soldItems] = await pool.execute(dataQuery, params);
+    } catch (userTableError) {
+      if (userTableError.code === '42P01') { // relation "users" does not exist
+        // Retry with "user" table
+        baseQuery = baseQuery.replace(/LEFT JOIN users u/, 'LEFT JOIN "user" u');
+        countQuery = baseQuery.replace(
+          /SELECT[\s\S]*?FROM/,
+          'SELECT COUNT(*) as total FROM'
+        ).replace(/ORDER BY[\s\S]*$/, '');
+        
+        [countResult] = await pool.execute(countQuery, params);
+        const total = countResult[0].total;
+
+        const dataQuery = baseQuery + ` ORDER BY s.sale_date DESC, si.sale_item_id DESC LIMIT ${limitNum} OFFSET ${offset}`;
+        [soldItems] = await pool.execute(dataQuery, params);
+      } else {
+        throw userTableError;
+      }
+    }
+
+    const total = countResult[0].total;
+
+    // Calculate summary statistics
+    const totalQuantity = soldItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0);
+    const totalRevenue = soldItems.reduce((sum, item) => sum + parseFloat(item.subtotal || 0), 0);
+    const uniqueMedicines = new Set(soldItems.map(item => item.medicine_id)).size;
+    const uniqueSales = new Set(soldItems.map(item => item.sale_id)).size;
+
+    res.json({
+      success: true,
+      message: 'Sold items history retrieved successfully',
+      data: {
+        items: soldItems,
+        summary: {
+          total_items: parseInt(total),
+          total_quantity_sold: totalQuantity,
+          total_revenue: totalRevenue,
+          unique_medicines: uniqueMedicines,
+          unique_sales: uniqueSales
+        },
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: parseInt(total),
+          totalPages: Math.ceil(total / limitNum)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get sold items history error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   // Inventory Interactions
   requestRestock,
@@ -906,6 +1211,10 @@ module.exports = {
   // Reports
   getLowStockReport,
   getExpiryReport,
-  getInventorySummary
+  getInventorySummary,
+  // Dashboard
+  getDashboard,
+  // Sold Items History
+  getSoldItemsHistory
 };
 
