@@ -25,20 +25,35 @@ if (process.env.NODE_ENV === 'production') {
     console.warn('⚠️  WARNING: FRONTEND_URL not set in production. CORS may be restricted.');
   }
   // Support multiple origins (comma-separated) or single origin
-  const allowedOrigins = process.env.FRONTEND_URL 
+  const allowedOrigins = process.env.FRONTEND_URL
     ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
     : [];
-  
+
+  // Explicitly allow the Vercel deploy (Fixes CORS issue)
+  allowedOrigins.push('https://pharmacare-m.vercel.app');
+
   corsOptions.origin = (origin, callback) => {
-  if (!origin) return callback(null, true); // Postman, mobile apps
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
 
-  if (allowedOrigins.includes(origin)) {
-    return callback(null, true);
-  }
+    // Check allowed specific origins
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-  console.warn(`❌ CORS blocked origin: ${origin}`);
-  return callback(null, false); // ← DO NOT throw error
-};
+    // Allow any Vercel deployment (for flexibility during dev/staging)
+    if (origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    }
+
+    // Allow localhost in production if needed (optional, effectively handled by devOrigins usually)
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      return callback(null, true);
+    }
+
+    console.log(`❌ CORS blocked origin: ${origin}`); // Changed to log for visibility
+    return callback(null, false);
+  };
 }
 else {
   // In development, allow localhost and the configured FRONTEND_URL
@@ -48,11 +63,11 @@ else {
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001'
   ];
-  
+
   if (process.env.FRONTEND_URL) {
     devOrigins.push(process.env.FRONTEND_URL);
   }
-  
+
   corsOptions.origin = (origin, callback) => {
     if (!origin || devOrigins.includes(origin)) {
       callback(null, true);
@@ -121,7 +136,7 @@ async function ensureDatabaseSchema() {
     const pool = require('./config/database');
     // Wait a moment for connection to establish
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     // Create notification table if it doesn't exist
     await pool.query(`
       CREATE TABLE IF NOT EXISTS notification (
@@ -135,12 +150,12 @@ async function ensureDatabaseSchema() {
         FOREIGN KEY (branch_id) REFERENCES branch(branch_id) ON DELETE CASCADE
       );
     `);
-    
+
     // Create indexes
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_branch_id ON notification(branch_id);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_is_read ON notification(is_read);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_notification_type ON notification(type);`);
-    
+
     console.log('✅ Database schema verified (notification table ready)');
   } catch (error) {
     // Don't fail startup if table creation fails (might already exist or connection issue)

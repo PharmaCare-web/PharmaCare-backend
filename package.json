@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "db:init": "node initDb.js",
     "migrate:index": "node migrations/add_sale_status_index.js",
     "update-db": "node update-database.js"
   },
