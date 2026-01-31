@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS audit_trail (
     description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (branch_id) REFERENCES branch(branch_id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES "user"(user_id) ON DELETE RESTRICT
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_trail_branch_id ON audit_trail(branch_id);

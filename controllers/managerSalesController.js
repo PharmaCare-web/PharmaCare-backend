@@ -465,38 +465,59 @@ const getAuditTrail = async (req, res, next) => {
     query += ' ORDER BY at.created_at DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
 
-    const [auditLogs] = await pool.execute(query, params);
+    let auditLogs;
+    let total = 0;
 
-    // Get total count
-    let countQuery = `
-      SELECT COUNT(*) as total
-      FROM audit_trail
-      WHERE branch_id = ?
-    `;
-    const countParams = [branchId];
+    try {
+      [auditLogs] = await pool.execute(query, params);
 
-    if (action_type) {
-      countQuery += ' AND action_type = ?';
-      countParams.push(action_type);
+      // Get total count
+      let countQuery = `
+        SELECT COUNT(*) as total
+        FROM audit_trail
+        WHERE branch_id = ?
+      `;
+      const countParams = [branchId];
+
+      if (action_type) {
+        countQuery += ' AND action_type = ?';
+        countParams.push(action_type);
+      }
+
+      if (entity_type) {
+        countQuery += ' AND entity_type = ?';
+        countParams.push(entity_type);
+      }
+
+      if (start_date) {
+        countQuery += ' AND created_at >= ?';
+        countParams.push(start_date);
+      }
+
+      if (end_date) {
+        countQuery += ' AND created_at <= ?';
+        countParams.push(end_date);
+      }
+
+      const [countResult] = await pool.execute(countQuery, countParams);
+      total = parseInt(countResult[0].total);
+    } catch (dbError) {
+      // Check if it's a "table doesn't exist" error
+      if (dbError.message && (
+        dbError.message.includes('does not exist') ||
+        dbError.message.includes('relation') ||
+        dbError.message.includes('42P01') ||
+        dbError.code === '42P01'
+      )) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database schema error. Please run the database migration.',
+          errorCode: dbError.code || '42P01',
+          details: 'The audit_trail table does not exist. Please run: database/migrations/create_audit_trail_and_refund_policy.sql'
+        });
+      }
+      throw dbError;
     }
-
-    if (entity_type) {
-      countQuery += ' AND entity_type = ?';
-      countParams.push(entity_type);
-    }
-
-    if (start_date) {
-      countQuery += ' AND created_at >= ?';
-      countParams.push(start_date);
-    }
-
-    if (end_date) {
-      countQuery += ' AND created_at <= ?';
-      countParams.push(end_date);
-    }
-
-    const [countResult] = await pool.execute(countQuery, countParams);
-    const total = parseInt(countResult[0].total);
 
     res.json({
       success: true,
@@ -528,27 +549,46 @@ const getAuditTrailById = async (req, res, next) => {
       });
     }
 
-    const [auditLog] = await pool.execute(
-      `SELECT 
-         at.audit_id,
-         at.branch_id,
-         at.user_id,
-         at.action_type,
-         at.entity_type,
-         at.entity_id,
-         at.description,
-         at.created_at,
-         u.full_name as user_name,
-         u.email as user_email,
-         r.role_name,
-         b.branch_name
-       FROM audit_trail at
-       LEFT JOIN users u ON at.user_id = u.user_id
-       LEFT JOIN role r ON u.role_id = r.role_id
-       LEFT JOIN branch b ON at.branch_id = b.branch_id
-       WHERE at.audit_id = ? AND at.branch_id = ?`,
-      [id, branchId]
-    );
+    let auditLog;
+    try {
+      [auditLog] = await pool.execute(
+        `SELECT 
+           at.audit_id,
+           at.branch_id,
+           at.user_id,
+           at.action_type,
+           at.entity_type,
+           at.entity_id,
+           at.description,
+           at.created_at,
+           u.full_name as user_name,
+           u.email as user_email,
+           r.role_name,
+           b.branch_name
+         FROM audit_trail at
+         LEFT JOIN users u ON at.user_id = u.user_id
+         LEFT JOIN role r ON u.role_id = r.role_id
+         LEFT JOIN branch b ON at.branch_id = b.branch_id
+         WHERE at.audit_id = ? AND at.branch_id = ?`,
+        [id, branchId]
+      );
+    } catch (dbError) {
+      // Check if it's a "table doesn't exist" error
+      if (dbError.message && (
+        dbError.message.includes('does not exist') ||
+        dbError.message.includes('relation') ||
+        dbError.message.includes('42P01') ||
+        dbError.code === '42P01'
+      )) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database schema error. Please run the database migration.',
+          errorCode: dbError.code || '42P01',
+          details: 'The audit_trail table does not exist. Please run: database/migrations/create_audit_trail_and_refund_policy.sql'
+        });
+      }
+      throw dbError;
+    }
 
     if (auditLog.length === 0) {
       return res.status(404).json({

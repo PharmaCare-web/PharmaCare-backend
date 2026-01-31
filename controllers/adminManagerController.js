@@ -884,44 +884,65 @@ const getAuditLogs = async (req, res, next) => {
     query += ' ORDER BY at.created_at DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
 
-    const [auditLogs] = await pool.execute(query, params);
+    let auditLogs;
+    let total = 0;
 
-    // Get total count
-    let countQuery = `SELECT COUNT(*) as total FROM audit_trail WHERE 1=1`;
-    const countParams = [];
+    try {
+      [auditLogs] = await pool.execute(query, params);
 
-    if (branch_id) {
-      countQuery += ' AND branch_id = ?';
-      countParams.push(branch_id);
+      // Get total count
+      let countQuery = `SELECT COUNT(*) as total FROM audit_trail WHERE 1=1`;
+      const countParams = [];
+
+      if (branch_id) {
+        countQuery += ' AND branch_id = ?';
+        countParams.push(branch_id);
+      }
+
+      if (user_id) {
+        countQuery += ' AND user_id = ?';
+        countParams.push(user_id);
+      }
+
+      if (action_type) {
+        countQuery += ' AND action_type = ?';
+        countParams.push(action_type);
+      }
+
+      if (entity_type) {
+        countQuery += ' AND entity_type = ?';
+        countParams.push(entity_type);
+      }
+
+      if (start_date) {
+        countQuery += ' AND created_at >= ?';
+        countParams.push(start_date);
+      }
+
+      if (end_date) {
+        countQuery += ' AND created_at <= ?';
+        countParams.push(end_date);
+      }
+
+      const [countResult] = await pool.execute(countQuery, countParams);
+      total = parseInt(countResult[0].total);
+    } catch (dbError) {
+      // Check if it's a "table doesn't exist" error
+      if (dbError.message && (
+        dbError.message.includes('does not exist') ||
+        dbError.message.includes('relation') ||
+        dbError.message.includes('42P01') ||
+        dbError.code === '42P01'
+      )) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database schema error. Please run the database migration.',
+          errorCode: dbError.code || '42P01',
+          details: 'The audit_trail table does not exist. Please run: database/migrations/create_audit_trail_and_refund_policy.sql'
+        });
+      }
+      throw dbError;
     }
-
-    if (user_id) {
-      countQuery += ' AND user_id = ?';
-      countParams.push(user_id);
-    }
-
-    if (action_type) {
-      countQuery += ' AND action_type = ?';
-      countParams.push(action_type);
-    }
-
-    if (entity_type) {
-      countQuery += ' AND entity_type = ?';
-      countParams.push(entity_type);
-    }
-
-    if (start_date) {
-      countQuery += ' AND created_at >= ?';
-      countParams.push(start_date);
-    }
-
-    if (end_date) {
-      countQuery += ' AND created_at <= ?';
-      countParams.push(end_date);
-    }
-
-    const [countResult] = await pool.execute(countQuery, countParams);
-    const total = parseInt(countResult[0].total);
 
     res.json({
       success: true,
@@ -936,14 +957,6 @@ const getAuditLogs = async (req, res, next) => {
     });
   } catch (error) {
     console.error('Get audit logs error:', error);
-    // If audit_trail table doesn't exist, return helpful message
-    if (error.message.includes('does not exist') || error.message.includes('relation') || error.message.includes('table')) {
-      return res.status(500).json({
-        success: false,
-        message: 'Audit trail table does not exist. Please create the audit_trail table first.',
-        note: 'You need to run a migration to create the audit_trail table'
-      });
-    }
     next(error);
   }
 };
