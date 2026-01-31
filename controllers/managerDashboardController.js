@@ -603,11 +603,77 @@ const getNotifications = async (req, res, next) => {
   }
 };
 
+// Get top selling medicines
+const getTopSelling = async (req, res, next) => {
+  try {
+    const managerBranchId = req.users.branch_id;
+    const { limit = 10, period = 'all' } = req.query; // period: 'today', 'week', 'month', 'year', 'all'
+
+    if (!managerBranchId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Manager must belong to a branch'
+      });
+    }
+
+    let dateFilter = '';
+    if (period === 'today') {
+      dateFilter = "AND s.sale_date::date = CURRENT_DATE";
+    } else if (period === 'week') {
+      dateFilter = `AND EXTRACT(YEAR FROM s.sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                    AND EXTRACT(WEEK FROM s.sale_date) = EXTRACT(WEEK FROM CURRENT_DATE)`;
+    } else if (period === 'month') {
+      dateFilter = `AND EXTRACT(YEAR FROM s.sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
+                    AND EXTRACT(MONTH FROM s.sale_date) = EXTRACT(MONTH FROM CURRENT_DATE)`;
+    } else if (period === 'year') {
+      dateFilter = `AND EXTRACT(YEAR FROM s.sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)`;
+    }
+    // 'all' or any other value means no date filter
+
+    const [topMedicines] = await pool.execute(
+      `SELECT 
+         m.medicine_id,
+         m.name,
+         m.barcode,
+         m.price,
+         SUM(si.quantity) as total_sold,
+         SUM(si.subtotal) as total_revenue,
+         COUNT(DISTINCT si.sale_id) as sale_count,
+         AVG(si.unit_price) as avg_price
+       FROM sale_item si
+       INNER JOIN sale s ON si.sale_id = s.sale_id
+       INNER JOIN medicine m ON si.medicine_id = m.medicine_id
+       WHERE s.branch_id = ?
+       AND s.status = 'completed'
+       ${dateFilter}
+       GROUP BY m.medicine_id, m.name, m.barcode, m.price
+       ORDER BY total_sold DESC
+       LIMIT ?`,
+      [managerBranchId, parseInt(limit)]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        medicines: topMedicines,
+        period: period,
+        limit: parseInt(limit),
+        count: topMedicines.length
+      },
+      message: 'Top selling medicines retrieved successfully'
+    });
+  } catch (error) {
+    console.error('Get top selling error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getDashboardSummary,
   getBranchOverview,
   getInventorySummary,
   getSalesSummary,
-  getNotifications
+  getNotifications,
+  getTopSelling
 };
 
