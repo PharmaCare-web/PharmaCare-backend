@@ -9,7 +9,8 @@
     "db:init": "node initDb.js",
     "migrate:index": "node migrations/add_sale_status_index.js",
     "update-db": "node update-database.js",
-    "migrate:audit": "node run-migration.js"
+    "migrate:audit": "node run-migration.js",
+    "migrate:audit:psql": "powershell -ExecutionPolicy Bypass -File run-migration.ps1"
   },
   "keywords": [
     "pharmacy",
