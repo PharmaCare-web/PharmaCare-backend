@@ -82,6 +82,9 @@ router.put('/manager/staff/:user_id', authMiddleware, managerAuth, managerStaffC
 router.delete('/manager/staff/:user_id', authMiddleware, managerAuth, managerStaffController.removeStaff);
 router.post('/manager/staff/:user_id/reset-password', authMiddleware, managerAuth, managerStaffController.resetStaffPassword);
 
+// Manager can create other manager accounts (requires admin activation)
+router.post('/manager/managers', authMiddleware, managerAuth, managerStaffController.createManager);
+
 // Manager Medicine Management Routes (Manager only - view and manage medicines)
 router.get('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.getAllMedicines);
 router.get('/manager/medicines/search', authMiddleware, managerAuth, managerMedicineController.searchMedicines);

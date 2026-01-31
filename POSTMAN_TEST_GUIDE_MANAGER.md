@@ -177,6 +177,72 @@ Authorization: Bearer {{manager_token}}
 
 ---
 
+## Manager Management Endpoints (Manager can create managers)
+
+### 1. Create Manager Account (by Manager)
+
+**Endpoint:** `POST {{base_url}}/api/manager/managers`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "full_name": "Jane Manager",
+  "email": "jane.manager@pharmacare.com",
+  "password": "Manager@123",
+  "branch_id": 1
+}
+```
+
+**Note:** `branch_id` is optional. If not provided, the new manager will be assigned to the creating manager's branch.
+
+**Expected Response:** 201 Created
+```json
+{
+  "success": true,
+  "message": "Manager account created successfully. Account is pending admin activation.",
+  "data": {
+    "user": {
+      "user_id": 5,
+      "full_name": "Jane Manager",
+      "email": "jane.manager@pharmacare.com",
+      "role_id": 2,
+      "branch_id": 1,
+      "is_active": false,
+      "is_email_verified": false,
+      "role_name": "Manager",
+      "branch_name": "Main Branch"
+    },
+    "verificationCode": "123456",
+    "emailSent": true,
+    "accountStatus": {
+      "is_active": false,
+      "is_email_verified": false,
+      "requires_admin_activation": true,
+      "note": "This manager account must be activated by an admin before it can be used."
+    },
+    "nextSteps": [
+      "1. Manager should verify email (optional)",
+      "2. Admin must activate the account using: PUT /api/admin/managers/:id/activate",
+      "3. After activation, manager can login"
+    ]
+  }
+}
+```
+
+**Important:** 
+- The created manager account is **INACTIVE** (`is_active: false`)
+- Only an **Admin** can activate it using: `PUT /api/admin/managers/:id/activate`
+- The manager cannot login until activated by admin
+- This is different from staff accounts (Pharmacist/Cashier) which are activated automatically after email verification
+
+---
+
 ## Branch Management Endpoints
 
 ### 1. Get All Branches

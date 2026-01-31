@@ -623,12 +623,174 @@ const verifyStaffCode = async (req, res, next) => {
   }
 };
 
+// Create new manager account (created by existing manager, but requires admin activation)
+const createManager = async (req, res, next) => {
+  try {
+    const managerBranchId = req.users.branch_id;
+    const managerUserId = req.users.user_id;
+
+    if (!managerBranchId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Manager must belong to a branch'
+      });
+    }
+
+    const { full_name, email, password, branch_id } = req.body;
+
+    // Validate required fields
+    if (!full_name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'full_name, email, and password are required'
+      });
+    }
+
+    // Get Manager role_id
+    const [managerRole] = await pool.execute(
+      "SELECT role_id FROM role WHERE role_name = 'Manager'"
+    );
+
+    if (managerRole.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Manager role not found in database'
+      });
+    }
+
+    const roleId = managerRole[0].role_id;
+
+    // Check if email already exists
+    const [existingUsers] = await pool.execute(
+      'SELECT user_id FROM users WHERE email = ?',
+      [email]
+    );
+
+    if (existingUsers.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Determine branch_id - use provided branch_id or manager's branch
+    let finalBranchId = branch_id || managerBranchId;
+
+    // If different branch_id provided, verify it exists
+    if (branch_id && branch_id !== managerBranchId) {
+      const [branchCheck] = await pool.execute(
+        'SELECT branch_id FROM branch WHERE branch_id = ?',
+        [branch_id]
+      );
+
+      if (branchCheck.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Branch not found'
+        });
+      }
+    }
+
+    // Generate 6-digit verification code
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Set expiration time (10 minutes from now)
+    const expirationTime = new Date(Date.now() + 10 * 60 * 1000);
+
+    // Hash password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create manager account as INACTIVE and NOT email verified
+    // Account will need admin activation (different from staff accounts)
+    const [result] = await pool.execute(
+      `INSERT INTO users (
+        full_name, email, password, role_id, branch_id, 
+        is_active, is_email_verified, verification_code, verification_code_expires,
+        created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING user_id`,
+      [
+        full_name,
+        email,
+        hashedPassword,
+        roleId,
+        finalBranchId,
+        false,  // INACTIVE - requires admin activation
+        false,  // Email not verified yet
+        verificationCode,
+        expirationTime,
+        managerUserId  // Created by this manager
+      ]
+    );
+
+    const newUserId = result.length > 0 ? (result[0].user_id || result[0].id) : null;
+    if (!newUserId) {
+      throw new Error('Failed to create user record');
+    }
+
+    // Send verification code email (optional - for email verification)
+    let emailSent = false;
+    let emailError = null;
+    
+    if (process.env.BREVO_API_KEY) {
+      try {
+        const { sendVerificationEmail } = require('../utils/emailService');
+        console.log(`📧 Attempting to send verification email to ${email} (${full_name})...`);
+        await sendVerificationEmail(email, verificationCode, full_name);
+        emailSent = true;
+        console.log(`✅ Verification code sent successfully to ${email}`);
+      } catch (err) {
+        emailError = err;
+        console.error('❌ Failed to send verification email:', err.message);
+      }
+    } else {
+      console.warn('⚠️  BREVO_API_KEY not configured - verification email will not be sent');
+    }
+
+    // Get created manager info
+    const [newManager] = await pool.execute(
+      `SELECT u.user_id, u.full_name, u.email, u.role_id, u.branch_id, 
+              u.is_active, u.is_email_verified, r.role_name, b.branch_name
+       FROM users u
+       LEFT JOIN role r ON u.role_id = r.role_id
+       LEFT JOIN branch b ON u.branch_id = b.branch_id
+       WHERE u.user_id = ?`,
+      [newUserId]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Manager account created successfully. Account is pending admin activation.',
+      data: {
+        user: newManager[0],
+        verificationCode: emailSent ? undefined : verificationCode,  // Only return if email not sent
+        emailSent: emailSent,
+        accountStatus: {
+          is_active: false,
+          is_email_verified: false,
+          requires_admin_activation: true,
+          note: 'This manager account must be activated by an admin before it can be used.'
+        },
+        nextSteps: [
+          '1. Manager should verify email (optional)',
+          '2. Admin must activate the account using: PUT /api/admin/managers/:id/activate',
+          '3. After activation, manager can login'
+        ]
+      }
+    });
+  } catch (error) {
+    console.error('Create manager error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   createStaff,
   getStaffMembers,
   updateStaff,
   removeStaff,
   resetStaffPassword,
-  verifyStaffCode
+  verifyStaffCode,
+  createManager
 };
 
