@@ -22,6 +22,12 @@ const managerAuth = require('../middleware/managerAuth');
 const pharmacistAuth = require('../middleware/pharmacistAuth');
 const cashierAuth = require('../middleware/cashierAuth');
 const requirePasswordChange = require('../middleware/requirePasswordChange');
+const multer = require('multer');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
 
 // Authentication routes
 router.use('/auth', authRoutes);
@@ -91,6 +97,13 @@ router.get('/manager/medicines/search', authMiddleware, managerAuth, managerMedi
 router.get('/manager/medicines/category/:category_id', authMiddleware, managerAuth, managerMedicineController.getMedicinesByCategory);
 router.get('/manager/medicines/:medicine_id', authMiddleware, managerAuth, managerMedicineController.getMedicineById);
 router.post('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.addMedicineToStock);
+router.post(
+  '/manager/medicines/import-excel',
+  authMiddleware,
+  managerAuth,
+  upload.single('file'),
+  managerMedicineController.importMedicinesFromExcel
+);
 router.put('/manager/medicines/:medicine_id/stock', authMiddleware, managerAuth, managerMedicineController.updateMedicineStock);
 router.delete('/manager/medicines/:medicine_id', authMiddleware, managerAuth, managerMedicineController.removeMedicineFromStock);
 router.get('/manager/medicines/sold-items/history', authMiddleware, managerAuth, managerMedicineController.getSoldItemsHistory);

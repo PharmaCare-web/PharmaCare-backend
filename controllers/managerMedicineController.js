@@ -1,7 +1,61 @@
 // Manager Medicine Management Controller
-// Allows managers to view medicine details and add medicines to stock
+// Allows managers to view medicine details, add medicines to stock, and import from Excel
 
 const pool = require('../config/database');
+const XLSX = require('xlsx');
+
+function normalizeHeaderKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\-]+/g, '_');
+}
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function toInt(value) {
+  const n = toNumber(value);
+  if (n === null) return null;
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function toISODateOnly(value) {
+  if (!value) return null;
+  let d = null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    d = value;
+  } else if (typeof value === 'number') {
+    // Excel date serial
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      d = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+    }
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) d = parsed;
+  }
+
+  if (!d || Number.isNaN(d.getTime())) return null;
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getRowValue(row, key) {
+  const wanted = normalizeHeaderKey(key);
+  for (const k of Object.keys(row)) {
+    if (normalizeHeaderKey(k) === wanted) return row[k];
+  }
+  return undefined;
+}
 
 // Get all medicines for manager's branch with details
 const getAllMedicines = async (req, res, next) => {
@@ -279,6 +333,185 @@ const addMedicineToStock = async (req, res, next) => {
     });
   } catch (error) {
     console.error('Add medicine to stock error:', error);
+    next(error);
+  }
+};
+
+// Import medicines from Excel (.xlsx) into medicine table
+// Expected columns: name, price, quantity, manufacturer, expiry_date
+// Skips rows with missing fields or duplicates (within file and existing DB for branch)
+const importMedicinesFromExcel = async (req, res, next) => {
+  try {
+    const managerBranchId = req.user.branch_id;
+    if (!managerBranchId) {
+      return res.status(400).json({ success: false, message: 'Manager must belong to a branch' });
+    }
+
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: 'Excel file is required (multipart/form-data field name: file)'
+      });
+    }
+
+    // category_id is required by current schema; allow providing it, otherwise default to first category
+    const requestedCategoryId = req.body.category_id || req.query.category_id;
+    let categoryId = requestedCategoryId ? parseInt(requestedCategoryId, 10) : null;
+    if (categoryId && Number.isNaN(categoryId)) categoryId = null;
+
+    if (categoryId) {
+      const [cats] = await pool.execute('SELECT category_id FROM category WHERE category_id = ?', [categoryId]);
+      if (cats.length === 0) {
+        return res.status(400).json({ success: false, message: 'Invalid category_id' });
+      }
+    } else {
+      const [cats] = await pool.execute('SELECT category_id FROM category ORDER BY category_id LIMIT 1');
+      if (cats.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No categories found. Create at least one category or provide category_id.'
+        });
+      }
+      categoryId = cats[0].category_id;
+    }
+
+    // Parse workbook
+    let workbook;
+    try {
+      workbook = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+    } catch (e) {
+      return res.status(400).json({ success: false, message: 'Invalid Excel file' });
+    }
+
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) {
+      return res.status(400).json({ success: false, message: 'Excel file has no sheets' });
+    }
+
+    const sheet = workbook.Sheets[sheetName];
+    const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    if (!Array.isArray(rawRows) || rawRows.length === 0) {
+      return res.status(400).json({ success: false, message: 'Excel sheet is empty' });
+    }
+
+    const stats = {
+      totalRows: rawRows.length,
+      inserted: 0,
+      skippedMissing: 0,
+      skippedDuplicateFile: 0,
+      skippedDuplicateDb: 0,
+      rowErrors: 0
+    };
+
+    const candidates = [];
+    const seenKeys = new Set();
+
+    for (let i = 0; i < rawRows.length; i++) {
+      const row = rawRows[i];
+
+      const name = String(getRowValue(row, 'name') ?? '').trim();
+      const manufacturer = String(getRowValue(row, 'manufacturer') ?? '').trim();
+      const price = toNumber(getRowValue(row, 'price'));
+      const quantity = toInt(getRowValue(row, 'quantity'));
+      const expiryDate = toISODateOnly(getRowValue(row, 'expiry_date'));
+
+      // Required fields per request
+      if (!name || !manufacturer || price === null || quantity === null || !expiryDate) {
+        stats.skippedMissing += 1;
+        continue;
+      }
+
+      if (price < 0 || quantity < 0) {
+        stats.rowErrors += 1;
+        continue;
+      }
+
+      const key = `${managerBranchId}|${name.toLowerCase()}|${manufacturer.toLowerCase()}|${expiryDate}`;
+      if (seenKeys.has(key)) {
+        stats.skippedDuplicateFile += 1;
+        continue;
+      }
+      seenKeys.add(key);
+
+      candidates.push({ name, manufacturer, price, quantity, expiry_date: expiryDate, key });
+    }
+
+    if (candidates.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No valid rows to import',
+        data: { ...stats, inserted: 0 }
+      });
+    }
+
+    // Fetch existing medicines for this branch matching names from file (to detect duplicates)
+    const uniqueNames = Array.from(new Set(candidates.map(r => r.name.toLowerCase())));
+    const placeholders = uniqueNames.map(() => '?').join(',');
+
+    const [existing] = await pool.execute(
+      `SELECT name, manufacturer, expiry_date
+       FROM medicine
+       WHERE branch_id = ?
+         AND LOWER(name) IN (${placeholders})`,
+      [managerBranchId, ...uniqueNames]
+    );
+
+    const existingKeys = new Set();
+    for (const e of existing) {
+      const eName = String(e.name || '').toLowerCase();
+      const eMan = String(e.manufacturer || '').toLowerCase();
+      const eExp = e.expiry_date ? toISODateOnly(e.expiry_date) : null;
+      if (!eName || !eMan || !eExp) continue;
+      existingKeys.add(`${managerBranchId}|${eName}|${eMan}|${eExp}`);
+    }
+
+    // Insert (transaction)
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
+    try {
+      for (const r of candidates) {
+        if (existingKeys.has(r.key)) {
+          stats.skippedDuplicateDb += 1;
+          continue;
+        }
+
+        await connection.execute(
+          `INSERT INTO medicine (
+             branch_id, category_id, name, type, quantity_in_stock, price, expiry_date, barcode, manufacturer
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            managerBranchId,
+            categoryId,
+            r.name,
+            null,
+            r.quantity,
+            r.price,
+            r.expiry_date,
+            null,
+            r.manufacturer
+          ]
+        );
+
+        stats.inserted += 1;
+        existingKeys.add(r.key);
+      }
+
+      await connection.commit();
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Excel import completed',
+      data: stats
+    });
+  } catch (error) {
+    console.error('Import medicines from Excel error:', error);
     next(error);
   }
 };
@@ -775,6 +1008,7 @@ module.exports = {
   removeMedicineFromStock,
   searchMedicines,
   getMedicinesByCategory,
-  getSoldItemsHistory
+  getSoldItemsHistory,
+  importMedicinesFromExcel
 };
 
