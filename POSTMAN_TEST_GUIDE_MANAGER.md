@@ -8,11 +8,13 @@ This guide provides step-by-step instructions for testing all Manager endpoints 
 2. [Setup](#setup)
 3. [Authentication Flow](#authentication-flow)
 4. [Dashboard Endpoints](#dashboard-endpoints)
-5. [Branch Management Endpoints](#branch-management-endpoints)
-6. [Sales & Payments Endpoints](#sales--payments-endpoints)
-7. [Settings Endpoints](#settings-endpoints)
-8. [Admin Manager Management Endpoints](#admin-manager-management-endpoints)
-9. [Common Issues & Troubleshooting](#common-issues--troubleshooting)
+5. [Manager Management Endpoints (Manager can create managers)](#manager-management-endpoints-manager-can-create-managers)
+6. [Medicine Import (Excel)](#medicine-import-excel)
+7. [Branch Management Endpoints](#branch-management-endpoints)
+8. [Sales & Payments Endpoints](#sales--payments-endpoints)
+9. [Settings Endpoints](#settings-endpoints)
+10. [Admin Manager Management Endpoints](#admin-manager-management-endpoints)
+11. [Common Issues & Troubleshooting](#common-issues--troubleshooting)
 
 ---
 
@@ -47,6 +49,7 @@ Create a new Postman collection:
 - Organize requests into folders:
   - `Authentication`
   - `Dashboard`
+  - `Medicine`
   - `Branch Management`
   - `Sales & Payments`
   - `Settings`
@@ -240,6 +243,91 @@ Content-Type: application/json
 - Only an **Admin** can activate it using: `PUT /api/admin/managers/:id/activate`
 - The manager cannot login until activated by admin
 - This is different from staff accounts (Pharmacist/Cashier) which are activated automatically after email verification
+
+---
+
+## Medicine Import (Excel)
+
+This endpoint lets a Manager import medicines from an Excel file into the existing `medicine` table.
+
+### 1. Import Medicines from Excel (.xlsx)
+
+**Endpoint:** `POST {{base_url}}/api/manager/medicines/import-excel`
+
+**Headers:**
+```
+Authorization: Bearer {{manager_token}}
+```
+
+**Body:** `form-data` (multipart)
+- **file** (type: File) → select your `.xlsx` file
+- **category_id** (type: Text, optional) → required by current DB schema
+  - If omitted, backend uses the **first category** found in DB
+
+**Excel columns (required, case-insensitive):**
+- `name`
+- `price`
+- `quantity`
+- `manufacturer`
+- `expiry_date`
+
+**Supported `expiry_date` formats:**
+- Excel Date cell
+- `YYYY-MM-DD` (recommended)
+- Most common date strings that JavaScript can parse
+
+**Duplicates (skipped):**
+- Duplicate inside the same file
+- Duplicate already in DB for the manager’s branch  
+  Duplicate key used: `(branch_id, lower(name), lower(manufacturer), expiry_date)`
+
+**Example: Postman setup**
+1. Go to **Body** → select **form-data**
+2. Add key `file` → change type to **File** → choose the Excel file
+3. (Optional) Add key `category_id` → type **Text** → value like `1`
+4. Click **Send**
+
+**Expected Response:** 201 Created
+```json
+{
+  "success": true,
+  "message": "Excel import completed",
+  "data": {
+    "totalRows": 120,
+    "inserted": 95,
+    "skippedMissing": 10,
+    "skippedDuplicateFile": 5,
+    "skippedDuplicateDb": 10,
+    "rowErrors": 0
+  }
+}
+```
+
+**Common Errors**
+
+**Missing file:** 400
+```json
+{
+  "success": false,
+  "message": "Excel file is required (multipart/form-data field name: file)"
+}
+```
+
+**Invalid category_id:** 400
+```json
+{
+  "success": false,
+  "message": "Invalid category_id"
+}
+```
+
+**No categories exist in DB (and category_id not provided):** 400
+```json
+{
+  "success": false,
+  "message": "No categories found. Create at least one category or provide category_id."
+}
+```
 
 ---
 
@@ -1104,6 +1192,11 @@ Ensure the manager account has a `branch_id` assigned. Managers cannot be system
 ### Dashboard
 - [ ] Get top selling medicines (all periods)
 - [ ] Get top selling with filters
+
+### Medicine
+- [ ] Import medicines from Excel (`POST /api/manager/medicines/import-excel`)
+- [ ] Verify duplicates are skipped (same name+manufacturer+expiry_date)
+- [ ] Verify missing fields are skipped
 
 ### Branch Management
 - [ ] Get all branches

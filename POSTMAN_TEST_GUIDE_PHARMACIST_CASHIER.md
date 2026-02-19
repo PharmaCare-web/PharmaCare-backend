@@ -38,9 +38,11 @@ Create a new Postman collection:
 - Organize requests into folders:
   - `Authentication`
   - `Pharmacist - Medicines`
+  - `Pharmacist - Import`
   - `Pharmacist - Inventory`
   - `Pharmacist - Sales`
   - `Pharmacist - Reports`
+  - `Cashier - Import`
   - `Cashier - Payments`
   - `Cashier - Receipts`
   - `Cashier - Returns`
@@ -308,6 +310,43 @@ GET {{base_url}}/api/pharmacist/medicines/5
     "price": 2.50,
     "expiry_date": "2025-12-31",
     "category_name": "Pain Relief"
+  }
+}
+```
+
+### 1.5. Import Medicines from Excel (Pharmacist)
+
+**Endpoint:** `POST {{base_url}}/api/pharmacist/medicines/import-excel`
+
+**Headers:**
+```
+Authorization: Bearer <pharmacist_token>
+```
+
+**Body:** `form-data` (multipart)
+- **file** (type: File) → select your `.xlsx`
+- **category_id** (type: Text, optional)  
+  - If omitted, backend uses the **first category** found in DB
+
+**Excel required columns (case-insensitive):**
+- `name`
+- `price`
+- `quantity`
+- `manufacturer`
+- `expiry_date`
+
+**Expected Response:** 201 Created
+```json
+{
+  "success": true,
+  "message": "Excel import completed",
+  "data": {
+    "totalRows": 10,
+    "inserted": 8,
+    "skippedMissing": 1,
+    "skippedDuplicateFile": 0,
+    "skippedDuplicateDb": 1,
+    "rowErrors": 0
   }
 }
 ```
@@ -624,6 +663,43 @@ Authorization: Bearer <pharmacist_token>
 ---
 
 ## Cashier Endpoints
+
+### 0. Import Medicines from Excel (Cashier)
+
+**Endpoint:** `POST {{base_url}}/api/cashier/medicines/import-excel`
+
+**Headers:**
+```
+Authorization: Bearer <cashier_token>
+```
+
+**Body:** `form-data` (multipart)
+- **file** (type: File) → select your `.xlsx`
+- **category_id** (type: Text, optional)  
+  - If omitted, backend uses the **first category** found in DB
+
+**Excel required columns (case-insensitive):**
+- `name`
+- `price`
+- `quantity`
+- `manufacturer`
+- `expiry_date`
+
+**Expected Response:** 201 Created
+```json
+{
+  "success": true,
+  "message": "Excel import completed",
+  "data": {
+    "totalRows": 10,
+    "inserted": 8,
+    "skippedMissing": 1,
+    "skippedDuplicateFile": 0,
+    "skippedDuplicateDb": 1,
+    "rowErrors": 0
+  }
+}
+```
 
 ### 1. Payment Management
 

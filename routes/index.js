@@ -137,6 +137,15 @@ router.get('/pharmacist/medicines', authMiddleware, requirePasswordChange, pharm
 router.get('/pharmacist/medicines/search', authMiddleware, requirePasswordChange, pharmacistAuth, medicineController.searchMedicines);
 router.get('/pharmacist/medicines/category/:category_id', authMiddleware, requirePasswordChange, pharmacistAuth, medicineController.getMedicinesByCategory);
 router.get('/pharmacist/medicines/:medicine_id', authMiddleware, requirePasswordChange, pharmacistAuth, medicineController.getMedicineById);
+// Import medicines from Excel (Pharmacist allowed)
+router.post(
+  '/pharmacist/medicines/import-excel',
+  authMiddleware,
+  requirePasswordChange,
+  pharmacistAuth,
+  upload.single('file'),
+  managerMedicineController.importMedicinesFromExcel
+);
 
 // 2. Inventory Interactions (Limited)
 router.post('/pharmacist/inventory/request-restock', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.requestRestock);
@@ -172,6 +181,16 @@ router.get('/cashier/payments/pending', authMiddleware, requirePasswordChange, c
 router.get('/cashier/payments/:sale_id', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getPaymentRequestDetails);
 router.post('/cashier/payments/:sale_id/accept', authMiddleware, requirePasswordChange, cashierAuth, cashierController.acceptPayment);
 router.get('/cashier/receipts/:sale_id', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getReceipt);
+
+// Medicine Import (Cashier allowed)
+router.post(
+  '/cashier/medicines/import-excel',
+  authMiddleware,
+  requirePasswordChange,
+  cashierAuth,
+  upload.single('file'),
+  managerMedicineController.importMedicinesFromExcel
+);
 
 // 2. Payment Reports
 router.get('/cashier/reports/payments', authMiddleware, requirePasswordChange, cashierAuth, cashierController.getPaymentReports);
