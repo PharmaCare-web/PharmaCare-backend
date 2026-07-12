@@ -2,43 +2,48 @@
 
 ## 🎯 Project Overview
 
-Complete pharmacy management system with authentication, inventory management, and sales tracking.
+Complete full-stack pharmacy management system with authentication, inventory management, sales tracking, and role-based access control.
 
 ## ✅ Tech Stack
 
 ### Backend
 - **Node.js** - Runtime environment
 - **Express.js** - Web framework
-- **MySQL** - Database (XAMPP)
+- **PostgreSQL** - Database
 - **JWT** - Authentication
 - **bcrypt** - Password hashing
+
+### Frontend
+- **React** 18.2 - UI library
+- **Vite** - Build tool
+- **React Router** - Routing
+- **Axios** - HTTP client
+- **Tailwind CSS** - Styling
+- **React Toastify** - Notifications
 
 ## 📁 Project Structure
 
 ```
 pharmacare/
-├── backend/
-│   ├── config/
-│   │   └── database.js          # MySQL connection
-│   ├── controllers/
-│   │   ├── authController.js    # Authentication logic
-│   │   └── userController.js    # User management
-│   ├── middleware/
-│   │   ├── auth.js              # JWT verification
-│   │   └── errorHandler.js      # Error handling
-│   ├── routes/
-│   │   ├── authRoutes.js        # Auth endpoints
-│   │   └── index.js             # Main routes
-│   ├── utils/
-│   │   └── validation.js        # Input validation
-│   ├── models/
-│   │   └── user.js              # User model
-│   ├── data/
-│   │   └── users.json           # Sample data
-│   ├── server.js                # Main server
-│   └── package.json             # Dependencies
+├── frontend/                     # React frontend
+│   ├── src/
+│   │   ├── api/                 # API service layer
+│   │   ├── components/          # Reusable components
+│   │   ├── context/             # React context (Auth)
+│   │   ├── pages/               # Page components
+│   │   ├── App.jsx              # Main app with routes
+│   │   └── main.jsx             # Entry point
+│   ├── package.json
+│   └── vite.config.js
+├── config/
+│   └── database.js              # PostgreSQL connection
+├── controllers/                  # Business logic
+├── middleware/                   # Auth & validation
+├── routes/                       # API routes
+├── models/                       # Data models
 ├── database/
-│   └── schema.sql               # Complete database schema
+│   └── postgresql_schema.sql   # Database schema
+├── server.js                     # Backend server
 └── README.md
 ```
 
@@ -65,46 +70,57 @@ pharmacare/
 
 ## 🚀 Quick Start
 
-### 1. Setup Database
+See **SETUP_INSTRUCTIONS.md** for detailed setup guide.
 
-**Using phpMyAdmin (Recommended):**
-1. Start XAMPP Control Panel
-2. Start **MySQL**
-3. Open http://localhost/phpmyadmin
-4. Click "Import" tab
-5. Choose `database/schema.sql`
-6. Click "Go"
-
-**Using Command Line:**
-```bash
-mysql -u root -p < database/schema.sql
-```
-
-### 2. Configure Backend
+### Backend Setup (Quick)
 
 ```bash
-cd backend
-```
-
-Create `.env` file:
-```env
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=
-DB_NAME=pharmacare
-PORT=5000
-JWT_SECRET=your-secret-key-change-this-in-production
-JWT_EXPIRE=7d
-```
-
-### 3. Install & Run
-
-```bash
+# 1. Install dependencies
 npm install
+
+# 2. Configure .env file (update with your database credentials)
+# See .env file in root
+
+# 3. Initialize database
+node initDb.js
+
+# 4. Start backend server
 npm start
 ```
 
-Server runs on: **http://localhost:5000**
+Backend runs on: **http://localhost:10000**
+
+### Frontend Setup (Quick)
+
+```bash
+# 1. Navigate to frontend
+cd frontend
+
+# 2. Install dependencies
+npm install
+
+# 3. Start development server
+npm run dev
+```
+
+Frontend runs on: **http://localhost:3000**
+
+### Start Both Servers (Windows)
+
+```bash
+# Double-click start-dev.bat
+# OR
+start-dev.bat
+```
+
+---
+
+## 📖 Documentation
+
+- **SETUP_INSTRUCTIONS.md** - Complete setup guide
+- **FRONTEND_BLUEPRINT.md** - Frontend architecture & pages
+- **FRONTEND_BACKEND_INTEGRATION_GUIDE.md** - Integration guide
+- **frontend/README.md** - Frontend-specific documentation
 
 ## 🔐 Authentication Endpoints
 
@@ -188,10 +204,17 @@ Use Postman or curl to register a new user (see RUN_TESTS.md for details)
 
 ## 📚 Documentation
 
-- **START_HERE.md** - Quick start guide
-- **RUN_TESTS.md** - Testing instructions
-- **backend/README_AUTH.md** - Authentication details
-- **backend/TESTING_GUIDE.md** - Complete testing guide
+- **SETUP_INSTRUCTIONS.md** - Complete setup guide
+- **FRONTEND_BLUEPRINT.md** - Frontend architecture & all pages
+- **FRONTEND_BACKEND_INTEGRATION_GUIDE.md** - API integration guide
+- **frontend/README.md** - Frontend-specific docs
+
+## 🌐 URLs
+
+- **Backend API:** http://localhost:10000
+- **Frontend:** http://localhost:3000
+- **API Health:** http://localhost:10000/api/health
+- **API Docs:** http://localhost:10000/api/auth
 
 ## 🤝 Contributing
 

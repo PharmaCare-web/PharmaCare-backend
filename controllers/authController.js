@@ -287,38 +287,40 @@ const login = async (req, res, next) => {
     // Check if users is active - different messages for different roles
     // MySQL returns BOOLEAN as 0/1, so check both
     const isActive = users.is_active === true || users.is_active === 1 || users.is_active === '1';
-    
-    if (!isActive) {
-      // Staff accounts (Pharmacist/Cashier) are activated automatically after email verification
-      // Only Managers need admin activation
-      const roleName = users.role_name || '';
-      
-      if (roleName === 'Manager') {
+    const roleName = users.role_name || '';
+    const isEmailVerified = users.is_email_verified === true || users.is_email_verified === 1 || users.is_email_verified === '1';
+
+    if (roleName === 'Manager') {
+      if (!isEmailVerified) {
         return res.status(401).json({
           success: false,
-          message: 'Account is pending admin activation. Please contact administrator.'
+          message: 'Please verify your email before logging in. Check your inbox for the verification code.'
         });
-      } else if (roleName === 'Pharmacist' || roleName === 'Cashier') {
-        // Check if email is verified
-        const isEmailVerified = users.is_email_verified === true || users.is_email_verified === 1 || users.is_email_verified === '1';
-        
+      }
+      if (!isActive) {
+        return res.status(401).json({
+          success: false,
+          message: 'Account is pending admin activation. Please wait for administrator approval.'
+        });
+      }
+    } else if (!isActive) {
+      if (roleName === 'Pharmacist' || roleName === 'Cashier') {
         if (!isEmailVerified) {
           return res.status(401).json({
             success: false,
             message: 'Account not activated yet. Please verify your email first. Contact your manager if you need help.'
           });
-        } else {
-          return res.status(401).json({
-            success: false,
-            message: 'Account is not active. Please contact your manager to activate your account.'
-          });
         }
-      } else {
         return res.status(401).json({
           success: false,
-          message: 'Account is deactivated. Please contact administrator.'
+          message: 'Account is not active. Please contact your manager to activate your account.'
         });
       }
+
+      return res.status(401).json({
+        success: false,
+        message: 'Account is deactivated. Please contact administrator.'
+      });
     }
 
     // Verify password

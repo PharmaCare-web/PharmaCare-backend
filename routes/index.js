@@ -19,6 +19,12 @@ const managerAuth = require('../middleware/managerAuth');
 const pharmacistAuth = require('../middleware/pharmacistAuth');
 const cashierAuth = require('../middleware/cashierAuth');
 const requirePasswordChange = require('../middleware/requirePasswordChange');
+const referenceController = require('../controllers/referenceController');
+
+// Public reference data (for registration and forms)
+router.get('/reference/branches', referenceController.getBranches);
+router.get('/reference/categories', referenceController.getCategories);
+router.get('/reference/roles', referenceController.getRoles);
 
 // Authentication routes
 router.use('/auth', authRoutes);
@@ -51,6 +57,7 @@ router.post('/manager/staff/verify', authMiddleware, managerAuth, managerStaffCo
 router.get('/manager/staff', authMiddleware, managerAuth, managerStaffController.getStaffMembers);
 router.put('/manager/staff/:user_id', authMiddleware, managerAuth, managerStaffController.updateStaff);
 router.delete('/manager/staff/:user_id', authMiddleware, managerAuth, managerStaffController.removeStaff);
+router.post('/manager/staff/:user_id/resend-verification', authMiddleware, managerAuth, managerStaffController.resendStaffVerification);
 router.post('/manager/staff/:user_id/reset-password', authMiddleware, managerAuth, managerStaffController.resetStaffPassword);
 
 // Manager Medicine Management Routes (Manager only - view and manage medicines)

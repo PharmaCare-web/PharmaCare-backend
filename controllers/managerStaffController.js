@@ -3,7 +3,7 @@
 
 const pool = require('../config/database');
 const bcrypt = require('bcryptjs');
-const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emailService');
+const { sendVerificationEmailSafe, sendPasswordResetEmailSafe } = require('../utils/emailService');
 
 // Create new staff member (Pharmacist or Cashier)
 const createStaff = async (req, res, next) => {
@@ -102,15 +102,13 @@ const createStaff = async (req, res, next) => {
     }
 
     // Send verification code email to staff member
-    let emailSent = false;
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-      try {
-        await sendVerificationEmail(email, verificationCode, full_name);
-        emailSent = true;
-        console.log(`✅ Verification code sent to ${email}`);
-      } catch (emailError) {
-        console.error('Failed to send verification email:', emailError.message);
-      }
+    const emailResult = await sendVerificationEmailSafe(email, verificationCode, full_name);
+    const emailSent = emailResult.sent;
+
+    if (emailSent) {
+      console.log(`✅ Verification code sent to ${email}`);
+    } else {
+      console.warn(`⚠️ Verification email not sent to ${email}: ${emailResult.error}`);
     }
 
     // Get created users info
@@ -124,16 +122,21 @@ const createStaff = async (req, res, next) => {
       [newUserId]
     );
 
+    const responseMessage = emailSent
+      ? 'Staff member created. Verification code sent to their email.'
+      : 'Staff member created, but the verification email could not be sent. Use the code shown below to verify the staff member.';
+
     res.status(201).json({
       success: true,
-      message: 'Staff member account created. Verification code sent to email.',
+      message: responseMessage,
       data: {
         users: newUser[0],
-        verificationCode: emailSent ? undefined : verificationCode,  // Only return if email not sent
-        emailSent: emailSent,
-        note: emailSent 
-          ? 'Verification code sent to staff email. Staff member should provide the code to you for verification.'
-          : 'Verification code generated. Send it to the staff member and verify using the verification endpoint.'
+        verificationCode: emailSent ? undefined : verificationCode,
+        emailSent,
+        emailError: emailSent ? undefined : emailResult.error,
+        note: emailSent
+          ? 'Ask the staff member for the verification code they received, then verify them using Verify Staff.'
+          : 'Share this verification code with the staff member, then use Verify Staff to activate their account.'
       }
     });
   } catch (error) {
@@ -161,6 +164,7 @@ const getStaffMembers = async (req, res, next) => {
          u.email,
          u.role_id,
          u.is_active,
+         u.is_email_verified,
          u.is_temporary_password,
          u.must_change_password,
          u.created_at,
@@ -376,24 +380,26 @@ const resetStaffPassword = async (req, res, next) => {
       [hashedPassword, user_id]
     );
 
-    // Send email if configured
-    let emailSent = false;
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-      try {
-        await sendPasswordResetEmail(staff[0].email, temporaryPassword, staff[0].full_name);
-        emailSent = true;
-        console.log(`✅ New temporary password sent to ${staff[0].email}`);
-      } catch (emailError) {
-        console.error('Failed to send email:', emailError.message);
-      }
+    const emailResult = await sendPasswordResetEmailSafe(
+      staff[0].email,
+      temporaryPassword,
+      staff[0].full_name
+    );
+    const emailSent = emailResult.sent;
+
+    if (!emailSent) {
+      console.warn(`⚠️ Password reset email not sent to ${staff[0].email}: ${emailResult.error}`);
     }
 
     res.json({
       success: true,
-      message: 'Password reset successfully',
+      message: emailSent
+        ? 'Password reset successfully. New temporary password sent to staff email.'
+        : 'Password reset successfully, but email could not be sent. Share the temporary password manually.',
       data: {
-        temporaryPassword: emailSent ? undefined : temporaryPassword,  // Only return if email not sent
-        emailSent: emailSent
+        temporaryPassword: emailSent ? undefined : temporaryPassword,
+        emailSent,
+        emailError: emailSent ? undefined : emailResult.error,
       }
     });
   } catch (error) {
@@ -508,43 +514,34 @@ const verifyStaffCode = async (req, res, next) => {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(temporaryPassword, saltRounds);
 
+    const staffUserId = staffMember.user_id;
+
     // Update users: verify email, activate account, set temporary password
     // For staff accounts (Pharmacist/Cashier), activate immediately - NO admin approval needed
-    const [updateResult] = await pool.execute(
+    await pool.execute(
       `UPDATE users 
-       SET is_email_verified = 1,
+       SET is_email_verified = TRUE,
            verification_code = NULL,
            verification_code_expires = NULL,
            password = ?,
-           is_active = 1,
-           is_temporary_password = 1,
-           must_change_password = 1
+           is_active = TRUE,
+           is_temporary_password = TRUE,
+           must_change_password = TRUE
        WHERE user_id = ?`,
-      [hashedPassword, user_id]
+      [hashedPassword, staffUserId]
     );
 
-    // Log activation for debugging
-    console.log(`✅ Staff account activated: user_id=${user_id}, email=${staffMember.email}, rows_affected=${updateResult.affectedRows}`);
-    
-    // Verify the update worked
-    if (updateResult.affectedRows === 0) {
-      console.error(`❌ Failed to activate staff account: user_id=${user_id}`);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to activate account. Please try again.'
-      });
-    }
+    console.log(`✅ Staff account activated: user_id=${staffUserId}, email=${staffMember.email}`);
 
-    // Send temporary password email to staff member
-    let emailSent = false;
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-      try {
-        await sendPasswordResetEmail(staffMember.email, temporaryPassword, staffMember.full_name);
-        emailSent = true;
-        console.log(`✅ Temporary password sent to ${staffMember.email}`);
-      } catch (emailError) {
-        console.error('Failed to send temporary password email:', emailError.message);
-      }
+    const emailResult = await sendPasswordResetEmailSafe(
+      staffMember.email,
+      temporaryPassword,
+      staffMember.full_name
+    );
+    const emailSent = emailResult.sent;
+
+    if (!emailSent) {
+      console.warn(`⚠️ Temporary password email not sent to ${staffMember.email}: ${emailResult.error}`);
     }
 
     // Get updated users info and verify activation
@@ -556,7 +553,7 @@ const verifyStaffCode = async (req, res, next) => {
        LEFT JOIN role r ON u.role_id = r.role_id
        LEFT JOIN branch b ON u.branch_id = b.branch_id
        WHERE u.user_id = ?`,
-      [user_id]
+      [staffUserId]
     );
 
     if (updatedUser.length === 0) {
@@ -573,34 +570,100 @@ const verifyStaffCode = async (req, res, next) => {
     const isEmailVerified = usersData.is_email_verified === 1 || usersData.is_email_verified === true;
     
     if (!isActive || !isEmailVerified) {
-      console.error(`❌ Account activation failed: user_id=${user_id}, is_active=${usersData.is_active}, is_email_verified=${usersData.is_email_verified}`);
+      console.error(`❌ Account activation failed: user_id=${staffUserId}, is_active=${usersData.is_active}, is_email_verified=${usersData.is_email_verified}`);
       return res.status(500).json({
         success: false,
         message: 'Account activation failed. Please try again or contact support.'
       });
     }
 
-    console.log(`✅ Staff account successfully activated and verified: user_id=${user_id}, email=${usersData.email}, is_active=${usersData.is_active}`);
+    console.log(`✅ Staff account successfully activated and verified: user_id=${staffUserId}, email=${usersData.email}, is_active=${usersData.is_active}`);
 
     res.json({
       success: true,
-      message: 'Email verified successfully. Staff account activated automatically (no admin approval needed).',
+      message: emailSent
+        ? 'Staff verified and activated. Temporary password sent to their email.'
+        : 'Staff verified and activated, but the password email could not be sent. Share the temporary password manually.',
       data: {
         users: usersData,
-        temporaryPassword: emailSent ? undefined : temporaryPassword,  // Only return if email not sent
-        emailSent: emailSent,
+        temporaryPassword: emailSent ? undefined : temporaryPassword,
+        emailSent,
+        emailError: emailSent ? undefined : emailResult.error,
         accountStatus: {
           is_active: isActive,
           is_email_verified: isEmailVerified,
           can_login: true
         },
         note: emailSent
-          ? 'Temporary password sent to staff email. Staff member can now login and must change password on first login.'
-          : 'Temporary password generated. Send it to the staff member manually. Staff member can now login and must change password on first login.'
+          ? 'Staff member can now log in and must change their password on first login.'
+          : 'Share the temporary password with the staff member so they can log in and change it.'
       }
     });
   } catch (error) {
     console.error('Verify staff code error:', error);
+    next(error);
+  }
+};
+
+// Resend verification code to staff member
+const resendStaffVerification = async (req, res, next) => {
+  try {
+    const managerBranchId = req.users.branch_id;
+    const { user_id } = req.params;
+
+    const [staff] = await pool.execute(
+      `SELECT u.user_id, u.email, u.full_name, u.is_email_verified, u.is_active
+       FROM users u
+       LEFT JOIN role r ON u.role_id = r.role_id
+       WHERE u.user_id = ?
+       AND u.branch_id = ?
+       AND r.role_name IN ('Pharmacist', 'Cashier')`,
+      [user_id, managerBranchId]
+    );
+
+    if (staff.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Staff member not found in your branch'
+      });
+    }
+
+    const staffMember = staff[0];
+
+    if (staffMember.is_email_verified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Staff email is already verified'
+      });
+    }
+
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expirationTime = new Date(Date.now() + 10 * 60 * 1000);
+
+    await pool.execute(
+      'UPDATE users SET verification_code = ?, verification_code_expires = ? WHERE user_id = ?',
+      [verificationCode, expirationTime, staffMember.user_id]
+    );
+
+    const emailResult = await sendVerificationEmailSafe(
+      staffMember.email,
+      verificationCode,
+      staffMember.full_name
+    );
+
+    res.json({
+      success: true,
+      message: emailResult.sent
+        ? 'Verification code resent to staff email.'
+        : 'New verification code generated, but email could not be sent. Share the code manually.',
+      data: {
+        verificationCode: emailResult.sent ? undefined : verificationCode,
+        emailSent: emailResult.sent,
+        emailError: emailResult.sent ? undefined : emailResult.error,
+      }
+    });
+  } catch (error) {
+    console.error('Resend staff verification error:', error);
     next(error);
   }
 };
@@ -611,6 +674,7 @@ module.exports = {
   updateStaff,
   removeStaff,
   resetStaffPassword,
-  verifyStaffCode
+  verifyStaffCode,
+  resendStaffVerification
 };
 

@@ -70,7 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_branch_created_by ON branch(created_by);
 -- ============================================================================
 -- 4. USER TABLE (Employee accounts - for authentication)
 -- ============================================================================
-CREATE TABLE IF NOT EXISTS "user" (
+CREATE TABLE IF NOT EXISTS users (
     user_id SERIAL PRIMARY KEY,
     full_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -90,16 +90,16 @@ CREATE TABLE IF NOT EXISTS "user" (
     created_by INTEGER NULL,
     FOREIGN KEY (role_id) REFERENCES role(role_id) ON DELETE RESTRICT,
     FOREIGN KEY (branch_id) REFERENCES branch(branch_id) ON DELETE RESTRICT,
-    FOREIGN KEY (created_by) REFERENCES "user"(user_id) ON DELETE SET NULL
+    FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_user_email ON "user"(email);
-CREATE INDEX IF NOT EXISTS idx_user_role_id ON "user"(role_id);
-CREATE INDEX IF NOT EXISTS idx_user_branch_id ON "user"(branch_id);
-CREATE INDEX IF NOT EXISTS idx_user_created_by ON "user"(created_by);
-CREATE INDEX IF NOT EXISTS idx_user_verification_code ON "user"(verification_code);
-CREATE INDEX IF NOT EXISTS idx_user_is_email_verified ON "user"(is_email_verified);
-CREATE INDEX IF NOT EXISTS idx_user_is_active ON "user"(is_active);
+CREATE INDEX IF NOT EXISTS idx_user_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_user_role_id ON users(role_id);
+CREATE INDEX IF NOT EXISTS idx_user_branch_id ON users(branch_id);
+CREATE INDEX IF NOT EXISTS idx_user_created_by ON users(created_by);
+CREATE INDEX IF NOT EXISTS idx_user_verification_code ON users(verification_code);
+CREATE INDEX IF NOT EXISTS idx_user_is_email_verified ON users(is_email_verified);
+CREATE INDEX IF NOT EXISTS idx_user_is_active ON users(is_active);
 
 -- ============================================================================
 -- 5. CATEGORY TABLE (Medicine categories)
@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS sale (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (branch_id) REFERENCES branch(branch_id) ON DELETE RESTRICT,
-    FOREIGN KEY (user_id) REFERENCES "user"(user_id) ON DELETE RESTRICT
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sale_branch_id ON sale(branch_id);
@@ -225,7 +225,7 @@ CREATE TABLE IF NOT EXISTS refund (
     refund_method VARCHAR(50),
     notes TEXT,
     FOREIGN KEY (return_id) REFERENCES return_table(return_id) ON DELETE RESTRICT,
-    FOREIGN KEY (user_id) REFERENCES "user"(user_id) ON DELETE RESTRICT
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_refund_return_id ON refund(return_id);
@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS password_reset (
     expires_at TIMESTAMP NOT NULL,
     used_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES "user"(user_id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_password_reset_user_id ON password_reset(user_id);
@@ -280,7 +280,7 @@ BEGIN
     ) THEN
         ALTER TABLE branch 
         ADD CONSTRAINT branch_created_by_fkey 
-        FOREIGN KEY (created_by) REFERENCES "user"(user_id) ON DELETE SET NULL;
+        FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE SET NULL;
     END IF;
 END $$;
 
@@ -296,7 +296,7 @@ CREATE TRIGGER update_role_updated_at BEFORE UPDATE ON role
 CREATE TRIGGER update_branch_updated_at BEFORE UPDATE ON branch
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_user_updated_at BEFORE UPDATE ON "user"
+CREATE TRIGGER update_user_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_category_updated_at BEFORE UPDATE ON category
@@ -350,7 +350,7 @@ BEGIN
     SELECT role_id INTO admin_role_id FROM role WHERE role_name = 'Admin' LIMIT 1;
     
     -- Create Admin user
-    INSERT INTO "user" (
+    INSERT INTO users (
         full_name,
         email,
         password,
@@ -405,7 +405,7 @@ SELECT
     u.email,
     u.is_active,
     r.role_name as role
-FROM "user" u
+FROM users u
 LEFT JOIN role r ON u.role_id = r.role_id
 WHERE u.email = 'admin@pharmacare.com';
 

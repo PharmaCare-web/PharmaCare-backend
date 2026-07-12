@@ -12,6 +12,16 @@ const BREVO_CONFIG = {
   RETRY_DELAY_MS: 2000
 };
 
+const isSmtpConfigured = () => Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
+
+const getFromEmail = () => {
+  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  if (!fromEmail) {
+    throw new Error('SMTP_FROM_EMAIL or SMTP_USER must be set as the sender address');
+  }
+  return fromEmail;
+};
+
 /**
  * Create a reusable transporter object using SMTP transport
  * with connection pooling and retry logic for Brevo
@@ -29,7 +39,8 @@ const createTransporter = () => {
     socketTimeout: BREVO_CONFIG.SOCKET_TIMEOUT,
     greetingTimeout: BREVO_CONFIG.GREETING_TIMEOUT,
     tls: {
-      rejectUnauthorized: process.env.NODE_ENV === 'production', // Only verify certs in production
+      // Brevo/Render deployments often need relaxed TLS verification
+      rejectUnauthorized: false,
       minVersion: 'TLSv1.2'
     },
     pool: true, // Enable connection pooling
@@ -74,21 +85,12 @@ const sendVerificationEmail = async (email, verificationCode, userName) => {
   }
 
   const transporter = createTransporter();
-  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-  const verificationLink = `${process.env.FRONTEND_URL || 'https://your-frontend-url.com'}/verify-email?code=${verificationCode}&email=${encodeURIComponent(email)}`;
+  const fromEmail = getFromEmail();
 
   const mailOptions = {
       from: `"PharmaCare" <${fromEmail}>`,
       to: email,
       subject: 'Email Verification Code - PharmaCare',
-      headers: {
-        'X-SMTPAPI': JSON.stringify({
-          category: ['verification'],
-          'send_at': Math.floor(Date.now() / 1000) + 5 // Send after 5 seconds
-        }),
-        'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}?subject=Unsubscribe_Verification>`,
-        'X-Auto-Response-Suppress': 'OOF, AutoReply',
-        'Precedence': 'bulk'
       html: `
         <!DOCTYPE html>
         <html>
@@ -216,21 +218,12 @@ const sendPasswordResetEmail = async (email, temporaryPassword, userName) => {
   }
 
   const transporter = createTransporter();
-  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
-  const resetLink = `${process.env.FRONTEND_URL || 'https://your-frontend-url.com'}/reset-password?token=${temporaryPassword}&email=${encodeURIComponent(email)}`;
+  const fromEmail = getFromEmail();
 
   const mailOptions = {
       from: `"PharmaCare" <${fromEmail}>`,
       to: email,
       subject: 'Password Reset - PharmaCare',
-      headers: {
-        'X-SMTPAPI': JSON.stringify({
-          category: ['password_reset'],
-          'send_at': Math.floor(Date.now() / 1000) + 5 // Send after 5 seconds
-        }),
-        'List-Unsubscribe': `<mailto:unsubscribe@${fromEmail.split('@')[1]}?subject=Unsubscribe_Password_Reset>`,
-        'X-Auto-Response-Suppress': 'OOF, AutoReply',
-        'Precedence': 'bulk'
       html: `
         <!DOCTYPE html>
         <html>
@@ -362,8 +355,46 @@ const sendPasswordResetEmail = async (email, temporaryPassword, userName) => {
     });
 };
 
+/**
+ * Send email safely without throwing - returns delivery status for API responses
+ */
+const sendVerificationEmailSafe = async (email, verificationCode, userName) => {
+  if (!isSmtpConfigured()) {
+    return {
+      sent: false,
+      error: 'SMTP is not configured on the server. Set SMTP_USER and SMTP_PASS environment variables.',
+    };
+  }
+
+  try {
+    await sendVerificationEmail(email, verificationCode, userName);
+    return { sent: true };
+  } catch (error) {
+    return { sent: false, error: error.message };
+  }
+};
+
+const sendPasswordResetEmailSafe = async (email, temporaryPassword, userName) => {
+  if (!isSmtpConfigured()) {
+    return {
+      sent: false,
+      error: 'SMTP is not configured on the server. Set SMTP_USER and SMTP_PASS environment variables.',
+    };
+  }
+
+  try {
+    await sendPasswordResetEmail(email, temporaryPassword, userName);
+    return { sent: true };
+  } catch (error) {
+    return { sent: false, error: error.message };
+  }
+};
+
 module.exports = {
+  isSmtpConfigured,
   sendVerificationEmail,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  sendVerificationEmailSafe,
+  sendPasswordResetEmailSafe,
 };
 

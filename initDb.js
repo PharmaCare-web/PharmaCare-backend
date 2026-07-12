@@ -40,7 +40,7 @@ const pool = new Pool({
 });
 
 async function run() {
-  const schemaPath = path.join(__dirname, '../database/postgresql_schema.sql');
+  const schemaPath = path.join(__dirname, 'database/postgresql_schema.sql');
   if (!fs.existsSync(schemaPath)) {
     throw new Error(`Schema file not found at ${schemaPath}`);
   }

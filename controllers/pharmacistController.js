@@ -281,7 +281,7 @@ const createSale = async (req, res, next) => {
           p.payment_type,
           p.amount as payment_amount
         FROM sale s
-        LEFT JOIN "user" u ON s.user_id = u.user_id
+        LEFT JOIN users u ON s.user_id = u.user_id
         LEFT JOIN payment p ON s.sale_id = p.sale_id
         WHERE s.sale_id = ?`,
         [saleId]

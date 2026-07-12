@@ -4,7 +4,7 @@ const pool = require('./config/database');
 async function listUsers() {
   try {
     // Query all users from "user" table (PostgreSQL)
-    const [users] = await pool.execute('SELECT * FROM "user"'); 
+    const [users] = await pool.execute('SELECT * FROM users'); 
     console.table(users); // Prints a table in the console
   } catch (err) {
     console.error('Error retrieving users:', err);

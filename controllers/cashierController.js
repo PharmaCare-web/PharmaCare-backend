@@ -23,7 +23,7 @@ const getPendingPayments = async (req, res, next) => {
         u.user_id as pharmacist_id,
         COUNT(si.sale_item_id) as item_count
       FROM sale s
-      INNER JOIN "user" u ON s.user_id = u.user_id
+      INNER JOIN users u ON s.user_id = u.user_id
       INNER JOIN role r ON u.role_id = r.role_id
       LEFT JOIN sale_item si ON s.sale_id = si.sale_id
       WHERE s.branch_id = ? 
@@ -61,7 +61,7 @@ const getPaymentRequestDetails = async (req, res, next) => {
         u.full_name as pharmacist_name,
         u.user_id as pharmacist_id
       FROM sale s
-      INNER JOIN "user" u ON s.user_id = u.user_id
+      INNER JOIN users u ON s.user_id = u.user_id
       WHERE s.sale_id = ? AND s.branch_id = ?`,
       [sale_id, branchId]
     );
@@ -188,7 +188,7 @@ const acceptPayment = async (req, res, next) => {
           p.payment_date,
           p.reference_number
         FROM sale s
-        LEFT JOIN "user" u ON s.user_id = u.user_id
+        LEFT JOIN users u ON s.user_id = u.user_id
         LEFT JOIN payment p ON s.sale_id = p.sale_id
         WHERE s.sale_id = ?`,
         [sale_id]
@@ -250,7 +250,7 @@ const getReceipt = async (req, res, next) => {
         p.payment_date,
         p.reference_number
       FROM sale s
-      LEFT JOIN "user" u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.user_id
       LEFT JOIN payment p ON s.sale_id = p.sale_id
       WHERE s.sale_id = ? AND s.branch_id = ?`,
       [sale_id, branchId]
@@ -316,7 +316,7 @@ const getPaymentReports = async (req, res, next) => {
         u.full_name as cashier_name
       FROM payment p
       INNER JOIN sale s ON p.sale_id = s.sale_id
-      LEFT JOIN "user" u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.user_id
       WHERE s.branch_id = ?
     `;
     const params = [branchId];
@@ -576,7 +576,7 @@ const getSalesForReturn = async (req, res, next) => {
         s.status,
         u.full_name as pharmacist_name
       FROM sale s
-      LEFT JOIN "user" u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.user_id
       WHERE s.branch_id = ? AND s.status = 'completed'
     `;
     const params = [branchId];
