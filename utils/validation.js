@@ -31,14 +31,24 @@ const validateRegister = (req, res, next) => {
 
   // Validate branch_id
   // Admin (role_id = 1) does not require branch_id (system role, not branch-specific)
-  // Pharmacy roles (Manager=2, Pharmacist=3, Cashier=4) require branch_id
-  if (role_id && parseInt(role_id) !== 1) {
-    // For non-Admin roles, branch_id is required
+  // Manager (role_id = 2) can either create new branch (branch_name) or join existing (branch_id)
+  // Pharmacy staff (Pharmacist=3, Cashier=4) MUST have branch_id (created by Manager with branch already assigned)
+  
+  const roleIdInt = parseInt(role_id);
+  
+  if (roleIdInt === 1) {
+    // Admin: branch_id should be null or not provided
+    // No validation needed
+  } else if (roleIdInt === 2) {
+    // Manager: Can create new branch OR join existing branch
+    // Either branch_name (creating new) OR branch_id (joining existing) is acceptable
+    // Validation is handled in controller logic, not here
+  } else if (roleIdInt === 3 || roleIdInt === 4) {
+    // Pharmacist/Cashier: MUST have branch_id (they don't register themselves, Manager creates them)
     if (!branch_id || isNaN(branch_id)) {
-      errors.push('Valid branch_id is required for pharmacy roles (Manager, Pharmacist, Cashier)');
+      errors.push('Valid branch_id is required for Pharmacist and Cashier roles');
     }
   }
-  // For Admin role, branch_id should be null or not provided
 
   if (errors.length > 0) {
     return res.status(400).json({
