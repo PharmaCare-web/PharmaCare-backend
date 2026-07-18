@@ -3,7 +3,8 @@
 
 const pool = require('../config/database');
 const bcrypt = require('bcryptjs');
-const { sendVerificationEmailSafe, sendPasswordResetEmailSafe } = require('../utils/emailService');
+// Use Brevo API instead of SMTP (more reliable on cloud platforms like Render)
+const { sendVerificationEmailSafe, sendPasswordResetEmailSafe } = require('../utils/emailServiceBrevoAPI');
 
 // Create new staff member (Pharmacist or Cashier)
 const createStaff = async (req, res, next) => {

@@ -4,7 +4,8 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
-const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emailService');
+// Use Brevo API instead of SMTP (more reliable on cloud platforms like Render)
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../utils/emailServiceBrevoAPI');
 
 // Register new users
 // NOTE: Only Managers can register. Admin is hard-coded. Pharmacist/Cashier are created by Manager.
@@ -200,18 +201,18 @@ const register = async (req, res, next) => {
     let emailSent = false;
     let registrationMessage = 'User registered successfully.';
 
-    // Send verification email (only if verification columns exist and SMTP is configured)
+    // Send verification email (only if verification columns exist and Brevo API is configured)
     if (createdUserId && hasVerificationColumns) {
       try {
-        // Only try to send email if SMTP is configured
-        if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+        // Only try to send email if Brevo API key is configured
+        if (process.env.BREVO_API_KEY) {
           await sendVerificationEmail(email, verificationCode, full_name);
           console.log(`✅ Verification code sent to ${email}`);
           emailSent = true;
           registrationMessage = 'User registered successfully. Please check your email for verification code.';
         } else {
-          console.warn('⚠️  SMTP not configured - skipping email verification');
-          console.warn('   Set SMTP_USER and SMTP_PASS in .env to enable email verification');
+          console.warn('⚠️  Brevo API not configured - skipping email verification');
+          console.warn('   Set BREVO_API_KEY in .env to enable email verification');
           registrationMessage = 'User registered successfully. Email verification is not configured.';
         }
       } catch (emailError) {
@@ -594,8 +595,8 @@ const resendVerificationCode = async (req, res, next) => {
       [verificationCode, expirationTime, users.user_id]
     );
 
-    // Send verification email (only if SMTP is configured)
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    // Send verification email (only if Brevo API is configured)
+    if (process.env.BREVO_API_KEY) {
       try {
         await sendVerificationEmail(email, verificationCode, users.full_name);
         console.log(`✅ Verification code resent to ${email}`);
@@ -609,19 +610,19 @@ const resendVerificationCode = async (req, res, next) => {
         // The code is still saved in the database
         res.json({
           success: true,
-          message: 'Verification code generated, but email could not be sent. Please check SMTP configuration.',
+          message: 'Verification code generated, but email could not be sent. Please check Brevo API configuration.',
           verification_code: verificationCode, // Only for development/testing
           warning: 'Email service is not properly configured'
         });
       }
     } else {
-      // SMTP not configured - return the code directly (for development/testing)
-      console.warn('⚠️  SMTP not configured - returning verification code in response');
+      // Brevo API not configured - return the code directly (for development/testing)
+      console.warn('⚠️  Brevo API not configured - returning verification code in response');
       res.json({
         success: true,
         message: 'Verification code generated. Email service is not configured.',
         verification_code: verificationCode, // Only for development/testing
-        warning: 'Email service is not configured. Set SMTP_USER and SMTP_PASS in .env to enable email sending.'
+        warning: 'Email service is not configured. Set BREVO_API_KEY in .env to enable email sending.'
       });
     }
   } catch (error) {
@@ -688,12 +689,12 @@ const forgotPassword = async (req, res, next) => {
       return password.split('').sort(() => Math.random() - 0.5).join('');
     };
 
-    // Check if SMTP is configured before proceeding
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    // Check if Brevo API is configured before proceeding
+    if (!process.env.BREVO_API_KEY) {
       return res.status(503).json({
         success: false,
         message: 'Email service is not configured. Please contact administrator.',
-        error: 'SMTP credentials not configured. Set SMTP_USER and SMTP_PASS in .env file.'
+        error: 'Brevo API key not configured. Set BREVO_API_KEY in .env file.'
       });
     }
 
