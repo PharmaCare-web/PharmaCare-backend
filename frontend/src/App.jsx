@@ -18,16 +18,19 @@ import ManagerManagement from './pages/admin/ManagerManagement';
 import ManagerDashboard from './pages/manager/Dashboard';
 import StaffManagement from './pages/manager/StaffManagement';
 import MedicineInventory from './pages/manager/MedicineInventory';
+import ManagerReports from './pages/manager/Reports';
 
 // Pharmacist pages
 import PharmacistDashboard from './pages/pharmacist/Dashboard';
 import MedicineSearch from './pages/pharmacist/MedicineSearch';
 import CreateSale from './pages/pharmacist/CreateSale';
+import PharmacistReports from './pages/pharmacist/Reports';
 
 // Cashier pages
 import CashierDashboard from './pages/cashier/Dashboard';
 import PendingPayments from './pages/cashier/PendingPayments';
 import ProcessReturns from './pages/cashier/ProcessReturns';
+import CashierReports from './pages/cashier/Reports';
 
 // Shared pages
 import Profile from './pages/shared/Profile';
@@ -66,6 +69,8 @@ function App() {
             <Route path="dashboard" element={<ManagerDashboard />} />
             <Route path="staff" element={<StaffManagement />} />
             <Route path="medicines" element={<MedicineInventory />} />
+            <Route path="reports/*" element={<ManagerReports />} />
+            <Route path="notifications" element={<div className="p-6"><h1 className="text-2xl font-bold">Notifications</h1><p className="mt-4 text-gray-600">Notifications page coming soon</p></div>} />
           </Route>
 
           {/* Pharmacist Routes */}
@@ -74,6 +79,7 @@ function App() {
             <Route path="dashboard" element={<PharmacistDashboard />} />
             <Route path="medicines" element={<MedicineSearch />} />
             <Route path="sales/new" element={<CreateSale />} />
+            <Route path="reports" element={<PharmacistReports />} />
           </Route>
 
           {/* Cashier Routes */}
@@ -82,6 +88,7 @@ function App() {
             <Route path="dashboard" element={<CashierDashboard />} />
             <Route path="payments/pending" element={<PendingPayments />} />
             <Route path="returns" element={<ProcessReturns />} />
+            <Route path="reports/*" element={<CashierReports />} />
           </Route>
 
           {/* Shared Protected Routes */}

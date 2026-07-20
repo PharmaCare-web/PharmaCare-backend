@@ -72,21 +72,15 @@ const Register = () => {
 
       const response = await api.post('/auth/register', payload);
 
-      toast.success('Registration successful!');
+      toast.success('Registration successful! Please verify your email.');
       
-      // Show email verification and approval instructions
-      toast.info('📧 Check your email to verify your account before logging in.', {
-        autoClose: 8000
+      // Redirect to verify-email page immediately with the email in state
+      navigate('/verify-email', { 
+        state: { 
+          email: formData.email,
+          message: 'Check your email for the 6-digit verification code'
+        } 
       });
-      
-      toast.info('✅ After email verification, wait for admin approval to activate your account.', {
-        autoClose: 8000
-      });
-      
-      // Navigate to login after 4 seconds
-      setTimeout(() => {
-        navigate('/login');
-      }, 4000);
 
     } catch (error) {
       const errorMsg = error.response?.data?.message || 'Registration failed';

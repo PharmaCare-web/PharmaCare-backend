@@ -14,6 +14,7 @@ export const managerAPI = {
   resendStaffVerification: (user_id) => api.post(`/manager/staff/${user_id}/resend-verification`),
   resetStaffPassword: (user_id) => api.post(`/manager/staff/${user_id}/reset-password`),
   getAllMedicines: (params) => api.get('/manager/medicines', { params }),
+  exportMedicines: () => api.get('/manager/medicines/export', { responseType: 'blob' }),
   addMedicine: (data) => api.post('/manager/medicines', data),
   updateMedicineStock: (medicine_id, data) =>
     api.put(`/manager/medicines/${medicine_id}/stock`, data),

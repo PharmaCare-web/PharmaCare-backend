@@ -62,6 +62,7 @@ router.post('/manager/staff/:user_id/reset-password', authMiddleware, managerAut
 
 // Manager Medicine Management Routes (Manager only - view and manage medicines)
 router.get('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.getAllMedicines);
+router.get('/manager/medicines/export', authMiddleware, managerAuth, managerMedicineController.exportMedicines);
 router.get('/manager/medicines/:medicine_id', authMiddleware, managerAuth, managerMedicineController.getMedicineById);
 router.post('/manager/medicines', authMiddleware, managerAuth, managerMedicineController.addMedicineToStock);
 router.put('/manager/medicines/:medicine_id/stock', authMiddleware, managerAuth, managerMedicineController.updateMedicineStock);

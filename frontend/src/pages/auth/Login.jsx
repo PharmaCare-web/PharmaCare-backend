@@ -33,14 +33,15 @@ const Login = () => {
     setLoading(false);
 
     if (result.success) {
-      // Save email if "Remember Me" is checked
-      if (rememberMe) {
+      // Save email if "Remember Me" is checked (only for successful non-temporary logins)
+      if (rememberMe && !result.mustChangePassword) {
         localStorage.setItem('rememberedEmail', email);
         localStorage.setItem('rememberMe', 'true');
-      } else {
+      } else if (!result.mustChangePassword) {
         localStorage.removeItem('rememberedEmail');
         localStorage.removeItem('rememberMe');
       }
+      // Note: For temporary password logins, the AuthContext handles navigation
     } else {
       toast.error(result.error || 'Login failed');
     }

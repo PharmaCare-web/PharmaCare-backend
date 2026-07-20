@@ -507,11 +507,95 @@ const removeMedicineFromStock = async (req, res, next) => {
   }
 };
 
+// Export medicines to CSV
+const exportMedicines = async (req, res, next) => {
+  try {
+    const managerBranchId = req.user.branch_id;
+
+    if (!managerBranchId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Manager must belong to a branch'
+      });
+    }
+
+    // Get all medicines for the branch
+    const [medicines] = await pool.execute(
+      `SELECT 
+        m.medicine_id,
+        m.name,
+        m.type,
+        m.quantity_in_stock,
+        m.price,
+        m.expiry_date,
+        m.barcode,
+        m.manufacturer,
+        c.category_name,
+        CASE 
+          WHEN m.quantity_in_stock < 10 THEN 'Low Stock'
+          WHEN m.expiry_date < CURRENT_DATE THEN 'Expired'
+          WHEN m.expiry_date < CURRENT_DATE + INTERVAL '30 days' THEN 'Expiring Soon'
+          ELSE 'Normal'
+        END as stock_status
+      FROM medicine m
+      LEFT JOIN category c ON m.category_id = c.category_id
+      WHERE m.branch_id = ?
+      ORDER BY m.name ASC`,
+      [managerBranchId]
+    );
+
+    // Create CSV content
+    const headers = [
+      'Medicine ID',
+      'Name',
+      'Type',
+      'Category',
+      'Quantity',
+      'Price',
+      'Expiry Date',
+      'Barcode',
+      'Manufacturer',
+      'Status'
+    ];
+
+    const csvRows = [headers.join(',')];
+
+    medicines.forEach(med => {
+      const row = [
+        med.medicine_id || '',
+        `"${(med.name || '').replace(/"/g, '""')}"`,
+        `"${(med.type || '').replace(/"/g, '""')}"`,
+        `"${(med.category_name || '').replace(/"/g, '""')}"`,
+        med.quantity_in_stock || 0,
+        med.price || 0,
+        med.expiry_date ? new Date(med.expiry_date).toISOString().split('T')[0] : '',
+        `"${(med.barcode || '').replace(/"/g, '""')}"`,
+        `"${(med.manufacturer || '').replace(/"/g, '""')}"`,
+        `"${(med.stock_status || '').replace(/"/g, '""')}"`
+      ];
+      csvRows.push(row.join(','));
+    });
+
+    const csvContent = csvRows.join('\n');
+
+    // Set response headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=medicines-export-${Date.now()}.csv`);
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('Export medicines error:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getAllMedicines,
   getMedicineById,
   addMedicineToStock,
   updateMedicineStock,
-  removeMedicineFromStock
+  removeMedicineFromStock,
+  exportMedicines
 };
+
 

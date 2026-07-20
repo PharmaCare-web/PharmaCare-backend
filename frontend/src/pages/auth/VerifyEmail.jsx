@@ -11,6 +11,7 @@ const VerifyEmail = () => {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [verified, setVerified] = useState(false);
+  const registrationMessage = location.state?.message;
 
   const handleVerify = async (e) => {
     e.preventDefault();
@@ -85,6 +86,11 @@ const VerifyEmail = () => {
           <p className="text-gray-600">
             Enter the 6-digit code sent to your email to complete registration
           </p>
+          {registrationMessage && (
+            <p className="mt-2 text-sm text-primary-600 font-medium">
+              {registrationMessage}
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleVerify} className="space-y-6">

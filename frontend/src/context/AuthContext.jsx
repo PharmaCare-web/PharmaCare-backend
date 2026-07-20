@@ -34,11 +34,25 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await api.post('/auth/login', { email, password });
-      const { token, users } = response;
+      const { token, users, mustChangePassword } = response;
 
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(users));
+      
+      // Store temporary password status separately
+      if (mustChangePassword) {
+        localStorage.setItem('mustChangePassword', 'true');
+      } else {
+        localStorage.removeItem('mustChangePassword');
+      }
+      
       setUser(users);
+
+      if (mustChangePassword) {
+        toast.info('Please change your temporary password');
+        navigate('/change-password', { state: { isTemporary: true } });
+        return { success: true, mustChangePassword: true };
+      }
 
       toast.success(`Welcome back, ${users.full_name}!`);
       redirectBasedOnRole(users.role_name);
@@ -71,6 +85,7 @@ export const AuthProvider = ({ children }) => {
     } finally {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
+      localStorage.removeItem('mustChangePassword');
       setUser(null);
       navigate('/login');
       toast.info('Logged out successfully');
@@ -87,6 +102,25 @@ export const AuthProvider = ({ children }) => {
     navigate(roleRoutes[roleName] || '/');
   };
 
+  const changePassword = async (currentPassword, newPassword, confirmPassword) => {
+    try {
+      const response = await api.post('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword
+      });
+      
+      // Clear the temporary password flag on successful change
+      localStorage.removeItem('mustChangePassword');
+      
+      return { success: true, message: response.message };
+    } catch (error) {
+      return { 
+        success: false, 
+        error: error.response?.data?.message || 'Failed to change password' 
+      };
+    }
+  };
+
   const value = {
     user,
     loading,
@@ -94,6 +128,7 @@ export const AuthProvider = ({ children }) => {
     register,
     logout,
     checkAuth,
+    changePassword,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
