@@ -387,6 +387,72 @@ const getSaleById = async (req, res, next) => {
   }
 };
 
+// Get all sales for the pharmacist's branch
+const getSales = async (req, res, next) => {
+  try {
+    const branchId = req.users.branch_id;
+    const { start_date, end_date, status, limit = 50 } = req.query;
+
+    let query = `
+      SELECT 
+        s.sale_id,
+        s.sale_date,
+        s.total_amount,
+        s.status,
+        u.full_name as pharmacist_name,
+        p.payment_type,
+        COUNT(si.sale_item_id) as item_count
+      FROM sale s
+      LEFT JOIN users u ON s.user_id = u.user_id
+      LEFT JOIN payment p ON s.sale_id = p.sale_id
+      LEFT JOIN sale_item si ON s.sale_id = si.sale_id
+      WHERE s.branch_id = ?
+    `;
+    const params = [branchId];
+
+    if (start_date) {
+      query += ` AND DATE(s.sale_date) >= ?`;
+      params.push(start_date);
+    }
+
+    if (end_date) {
+      query += ` AND DATE(s.sale_date) <= ?`;
+      params.push(end_date);
+    }
+
+    if (status) {
+      query += ` AND s.status = ?`;
+      params.push(status);
+    }
+
+    query += ` GROUP BY s.sale_id, s.sale_date, s.total_amount, s.status, u.full_name, p.payment_type ORDER BY s.sale_date DESC LIMIT ?`;
+    params.push(parseInt(limit));
+
+    const [sales] = await pool.execute(query, params);
+
+    // Calculate summary
+    const totalSales = sales.reduce((sum, s) => sum + parseFloat(s.total_amount || 0), 0);
+    const statusCounts = sales.reduce((acc, s) => {
+      acc[s.status] = (acc[s.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: sales,
+      message: 'Sales retrieved successfully',
+      summary: {
+        total_sales: totalSales,
+        total_count: sales.length,
+        status_counts: statusCounts
+      }
+    });
+  } catch (error) {
+    console.error('Get sales error:', error);
+    next(error);
+  }
+};
+
 // ============================================================================
 // 3. MEDICINE STOCK MANAGEMENT (Add/Remove Medicine)
 // ============================================================================
@@ -803,6 +869,7 @@ module.exports = {
   // Sales Support
   createSale,
   getSaleById,
+  getSales,
   // Reports
   getLowStockReport,
   getExpiryReport,

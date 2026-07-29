@@ -91,6 +91,7 @@ router.delete('/pharmacist/medicines/:medicine_id', authMiddleware, requirePassw
 // 3. Sales Support
 router.post('/pharmacist/sales', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.createSale);
 router.get('/pharmacist/sales/:sale_id', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getSaleById);
+router.get('/pharmacist/sales', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getSales);
 
 // 4. Reports (Limited)
 router.get('/pharmacist/reports/low-stock', authMiddleware, requirePasswordChange, pharmacistAuth, pharmacistController.getLowStockReport);

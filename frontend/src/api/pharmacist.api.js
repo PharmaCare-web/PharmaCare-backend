@@ -10,6 +10,7 @@ export const pharmacistAPI = {
   requestRestock: (data) => api.post('/pharmacist/inventory/request-restock', data),
   createSale: (data) => api.post('/pharmacist/sales', data),
   getSaleById: (id) => api.get(`/pharmacist/sales/${id}`),
+  getSales: (params) => api.get('/pharmacist/sales', { params }),
   getLowStockReport: (threshold = 10) =>
     api.get('/pharmacist/reports/low-stock', { params: { threshold } }),
   getExpiryReport: (days = 30) =>
