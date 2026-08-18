@@ -3,7 +3,6 @@
 // All data is filtered by manager's branch_id
 
 const pool = require('../config/database');
-const bcrypt = require('bcryptjs');
 
 // Get complete dashboard summary for manager's branch
 const getDashboardSummary = async (req, res, next) => {
@@ -11,216 +10,70 @@ const getDashboardSummary = async (req, res, next) => {
     const managerBranchId = req.users.branch_id;
 
     if (!managerBranchId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Manager must belong to a branch'
-      });
+      return res.status(400).json({ success: false, message: 'Manager must belong to a branch' });
     }
 
-    // Get branch overview
-    const [branchInfo] = await pool.execute(
-      `SELECT branch_id, branch_name, location, email, phone
-       FROM branch
-       WHERE branch_id = ?`,
+    const branchInfo = await pool.query(
+      'SELECT branch_id, branch_name, location, email, phone FROM branch WHERE branch_id = $1',
       [managerBranchId]
     );
-
-    if (branchInfo.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Branch not found'
-      });
+    if (branchInfo.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Branch not found' });
     }
+    const branch = branchInfo.rows[0];
 
-    const branch = branchInfo[0];
-
-    // Get manager count (how many managers in this branch)
-    const [managerCount] = await pool.execute(
-      `SELECT COUNT(*) as total
-       FROM users u
-       LEFT JOIN role r ON u.role_id = r.role_id
-       WHERE u.branch_id = ? 
-       AND r.role_name = 'Manager'`,
-      [managerBranchId]
-    );
-
-    // Get employee count (Pharmacists and Cashiers in this branch)
-    const [employeeCount] = await pool.execute(
-      `SELECT COUNT(*) as total
-       FROM users u
-       LEFT JOIN role r ON u.role_id = r.role_id
-       WHERE u.branch_id = ? 
-       AND r.role_name IN ('Pharmacist', 'Cashier')`,
-      [managerBranchId]
-    );
-
-    // Get active/inactive employee counts (Pharmacists and Cashiers only)
-    const [activeCount] = await pool.execute(
-      `SELECT COUNT(*) as active
-       FROM users u
-       LEFT JOIN role r ON u.role_id = r.role_id
-       WHERE u.branch_id = ? 
-       AND r.role_name IN ('Pharmacist', 'Cashier')
-       AND u.is_active = TRUE`,
-      [managerBranchId]
-    );
-
-    const [inactiveCount] = await pool.execute(
-      `SELECT COUNT(*) as inactive
-       FROM users u
-       LEFT JOIN role r ON u.role_id = r.role_id
-       WHERE u.branch_id = ? 
-       AND r.role_name IN ('Pharmacist', 'Cashier')
-       AND u.is_active = FALSE`,
-      [managerBranchId]
-    );
-
-    // Get inventory summary
-    const [inventoryData] = await pool.execute(
-      `SELECT 
-         COUNT(*) as total_medicines,
-         SUM(quantity_in_stock) as total_quantity,
-         COUNT(CASE WHEN quantity_in_stock < 10 THEN 1 END) as low_stock_count,
-         COUNT(CASE WHEN expiry_date < CURRENT_DATE + INTERVAL '30 days' AND expiry_date >= CURRENT_DATE THEN 1 END) as expiring_soon_count,
-         COUNT(CASE WHEN expiry_date < CURRENT_DATE THEN 1 END) as expired_count
-       FROM medicine
-       WHERE branch_id = ?`,
-      [managerBranchId]
-    );
-
-    // Get sales summary (today, this week, this month)
-    const [salesToday] = await pool.execute(
-      `SELECT 
-         COUNT(*) as count,
-         COALESCE(SUM(total_amount), 0) as revenue
-       FROM sale
-       WHERE branch_id = ? 
-       AND sale_date::date = CURRENT_DATE
-       AND status = 'completed'`,
-      [managerBranchId]
-    );
-
-    const [salesThisWeek] = await pool.execute(
-      `SELECT 
-         COUNT(*) as count,
-         COALESCE(SUM(total_amount), 0) as revenue
-       FROM sale
-       WHERE branch_id = ? 
-       AND EXTRACT(YEAR FROM sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-       AND EXTRACT(WEEK FROM sale_date) = EXTRACT(WEEK FROM CURRENT_DATE)
-       AND status = 'completed'`,
-      [managerBranchId]
-    );
-
-    const [salesThisMonth] = await pool.execute(
-      `SELECT 
-         COUNT(*) as count,
-         COALESCE(SUM(total_amount), 0) as revenue
-       FROM sale
-       WHERE branch_id = ? 
-       AND EXTRACT(YEAR FROM sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-       AND EXTRACT(MONTH FROM sale_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-       AND status = 'completed'`,
-      [managerBranchId]
-    );
-
-    // Get pending sales/returns
-    const [pendingSales] = await pool.execute(
-      `SELECT COUNT(*) as count
-       FROM sale
-       WHERE branch_id = ? 
-       AND status != 'completed'`,
-      [managerBranchId]
-    );
-
-    const [pendingReturns] = await pool.execute(
-      `SELECT COUNT(*) as count
-       FROM return_table rt
-       INNER JOIN sale s ON rt.sale_id = s.sale_id
-       WHERE s.branch_id = ? 
-       AND rt.status = 'pending'`,
-      [managerBranchId]
-    );
-
-    // Get top 5 selling medicines
-    const [topMedicines] = await pool.execute(
-      `SELECT 
-         m.medicine_id,
-         m.name,
-         SUM(si.quantity) as total_sold,
-         SUM(si.subtotal) as total_revenue
-       FROM sale_item si
-       INNER JOIN sale s ON si.sale_id = s.sale_id
-       INNER JOIN medicine m ON si.medicine_id = m.medicine_id
-       WHERE s.branch_id = ?
-       AND s.status = 'completed'
-       GROUP BY m.medicine_id, m.name
-       ORDER BY total_sold DESC
-       LIMIT 5`,
-      [managerBranchId]
-    );
-
-    // Get low stock medicines
-    const [lowStockMedicines] = await pool.execute(
-      `SELECT medicine_id, name, quantity_in_stock
-       FROM medicine
-       WHERE branch_id = ?
-       AND quantity_in_stock < 10
-       ORDER BY quantity_in_stock ASC
-       LIMIT 10`,
-      [managerBranchId]
-    );
-
-    // Get expired/expiring medicines
-    const [expiredMedicines] = await pool.execute(
-      `SELECT medicine_id, name, expiry_date, quantity_in_stock
-       FROM medicine
-       WHERE branch_id = ?
-       AND expiry_date < CURRENT_DATE + INTERVAL '30 days'
-       ORDER BY expiry_date ASC
-       LIMIT 10`,
-      [managerBranchId]
-    );
+    const [managerCount, employeeCount, activeCount, inactiveCount, inventoryData,
+      salesToday, salesThisWeek, salesThisMonth, pendingSales, pendingReturns,
+      topMedicines, lowStockMedicines, expiredMedicines] = await Promise.all([
+      pool.query(`SELECT COUNT(*) as total FROM users u LEFT JOIN role r ON u.role_id=r.role_id WHERE u.branch_id=$1 AND r.role_name='Manager'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as total FROM users u LEFT JOIN role r ON u.role_id=r.role_id WHERE u.branch_id=$1 AND r.role_name IN ('Pharmacist','Cashier')`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as active FROM users u LEFT JOIN role r ON u.role_id=r.role_id WHERE u.branch_id=$1 AND r.role_name IN ('Pharmacist','Cashier') AND u.is_active=TRUE`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as inactive FROM users u LEFT JOIN role r ON u.role_id=r.role_id WHERE u.branch_id=$1 AND r.role_name IN ('Pharmacist','Cashier') AND u.is_active=FALSE`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as total_medicines, COALESCE(SUM(quantity_in_stock),0) as total_quantity,
+        COUNT(CASE WHEN quantity_in_stock < 10 THEN 1 END) as low_stock_count,
+        COUNT(CASE WHEN expiry_date < CURRENT_DATE + INTERVAL '30 days' AND expiry_date >= CURRENT_DATE THEN 1 END) as expiring_soon_count,
+        COUNT(CASE WHEN expiry_date < CURRENT_DATE THEN 1 END) as expired_count
+        FROM medicine WHERE branch_id=$1`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND DATE(sale_date)=CURRENT_DATE AND status='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND EXTRACT(YEAR FROM sale_date)=EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(WEEK FROM sale_date)=EXTRACT(WEEK FROM CURRENT_DATE) AND status='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND EXTRACT(YEAR FROM sale_date)=EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM sale_date)=EXTRACT(MONTH FROM CURRENT_DATE) AND status='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count FROM sale WHERE branch_id=$1 AND status!='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count FROM return_table rt INNER JOIN sale s ON rt.sale_id=s.sale_id WHERE s.branch_id=$1 AND rt.status='pending'`, [managerBranchId]),
+      pool.query(`SELECT m.medicine_id, m.name, SUM(si.quantity) as total_sold, SUM(si.subtotal) as total_revenue FROM sale_item si INNER JOIN sale s ON si.sale_id=s.sale_id INNER JOIN medicine m ON si.medicine_id=m.medicine_id WHERE s.branch_id=$1 AND s.status='completed' GROUP BY m.medicine_id, m.name ORDER BY total_sold DESC LIMIT 5`, [managerBranchId]),
+      pool.query(`SELECT medicine_id, name, quantity_in_stock FROM medicine WHERE branch_id=$1 AND quantity_in_stock < 10 ORDER BY quantity_in_stock ASC LIMIT 10`, [managerBranchId]),
+      pool.query(`SELECT medicine_id, name, expiry_date, quantity_in_stock FROM medicine WHERE branch_id=$1 AND expiry_date < CURRENT_DATE + INTERVAL '30 days' ORDER BY expiry_date ASC LIMIT 10`, [managerBranchId]),
+    ]);
 
     res.json({
       success: true,
       data: {
         branchOverview: {
-          branchId: branch.branch_id,
-          branchName: branch.branch_name,
-          location: branch.location || null,
-          email: branch.email || null,
-          phone: branch.phone || null,
-          totalManagers: parseInt(managerCount[0].total) || 0,
-          totalEmployees: parseInt(employeeCount[0].total) || 0,
-          activeEmployees: parseInt(activeCount[0].active) || 0,
-          inactiveEmployees: parseInt(inactiveCount[0].inactive) || 0
+          branchId: branch.branch_id, branchName: branch.branch_name,
+          location: branch.location || null, email: branch.email || null, phone: branch.phone || null,
+          totalManagers: parseInt(managerCount.rows[0].total) || 0,
+          totalEmployees: parseInt(employeeCount.rows[0].total) || 0,
+          activeEmployees: parseInt(activeCount.rows[0].active) || 0,
+          inactiveEmployees: parseInt(inactiveCount.rows[0].inactive) || 0,
+          totalStaff: parseInt(employeeCount.rows[0].total) || 0,
         },
         inventorySummary: {
-          totalMedicines: inventoryData[0].total_medicines,
-          totalQuantity: parseInt(inventoryData[0].total_quantity) || 0,
-          lowStockCount: inventoryData[0].low_stock_count,
-          expiringSoonCount: inventoryData[0].expiring_soon_count,
-          expiredCount: inventoryData[0].expired_count,
-          lowStockMedicines: lowStockMedicines,
-          expiredMedicines: expiredMedicines
+          totalMedicines: parseInt(inventoryData.rows[0].total_medicines) || 0,
+          total_medicines: parseInt(inventoryData.rows[0].total_medicines) || 0,
+          totalQuantity: parseInt(inventoryData.rows[0].total_quantity) || 0,
+          lowStockCount: parseInt(inventoryData.rows[0].low_stock_count) || 0,
+          low_stock: parseInt(inventoryData.rows[0].low_stock_count) || 0,
+          expiringSoonCount: parseInt(inventoryData.rows[0].expiring_soon_count) || 0,
+          expiredCount: parseInt(inventoryData.rows[0].expired_count) || 0,
+          lowStockMedicines: lowStockMedicines.rows,
+          expiredMedicines: expiredMedicines.rows
         },
         salesSummary: {
-          today: {
-            count: salesToday[0].count,
-            revenue: parseFloat(salesToday[0].revenue) || 0
-          },
-          thisWeek: {
-            count: salesThisWeek[0].count,
-            revenue: parseFloat(salesThisWeek[0].revenue) || 0
-          },
-          thisMonth: {
-            count: salesThisMonth[0].count,
-            revenue: parseFloat(salesThisMonth[0].revenue) || 0
-          },
-          pendingSales: pendingSales[0].count,
-          pendingReturns: pendingReturns[0].count,
-          topSellingMedicines: topMedicines
+          today: { count: parseInt(salesToday.rows[0].count)||0, revenue: parseFloat(salesToday.rows[0].revenue)||0 },
+          thisWeek: { count: parseInt(salesThisWeek.rows[0].count)||0, revenue: parseFloat(salesThisWeek.rows[0].revenue)||0 },
+          thisMonth: { count: parseInt(salesThisMonth.rows[0].count)||0, revenue: parseFloat(salesThisMonth.rows[0].revenue)||0 },
+          pendingSales: parseInt(pendingSales.rows[0].count)||0,
+          pendingReturns: parseInt(pendingReturns.rows[0].count)||0,
+          topSellingMedicines: topMedicines.rows
         }
       },
       message: 'Dashboard summary retrieved successfully'
@@ -235,62 +88,25 @@ const getDashboardSummary = async (req, res, next) => {
 const getBranchOverview = async (req, res, next) => {
   try {
     const managerBranchId = req.users.branch_id;
+    if (!managerBranchId) return res.status(400).json({ success: false, message: 'Manager must belong to a branch' });
 
-    if (!managerBranchId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Manager must belong to a branch'
-      });
-    }
+    const branchInfo = await pool.query('SELECT branch_id, branch_name, location, email, phone FROM branch WHERE branch_id=$1', [managerBranchId]);
+    if (branchInfo.rows.length === 0) return res.status(404).json({ success: false, message: 'Branch not found' });
 
-    const [branchInfo] = await pool.execute(
-      `SELECT branch_id, branch_name, location, email, phone
-       FROM branch
-       WHERE branch_id = ?`,
-      [managerBranchId]
-    );
+    const [employeeCount, managerCount] = await Promise.all([
+      pool.query(`SELECT COUNT(*) as total, SUM(CASE WHEN u.is_active=TRUE THEN 1 ELSE 0 END) as active, SUM(CASE WHEN u.is_active=FALSE THEN 1 ELSE 0 END) as inactive FROM users u LEFT JOIN role r ON u.role_id=r.role_id WHERE u.branch_id=$1 AND r.role_name IN ('Pharmacist','Cashier')`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as total FROM users u LEFT JOIN role r ON u.role_id=r.role_id WHERE u.branch_id=$1 AND r.role_name='Manager'`, [managerBranchId]),
+    ]);
 
-    if (branchInfo.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Branch not found'
-      });
-    }
-
-    const [employeeCount] = await pool.execute(
-      `SELECT 
-         COUNT(*) as total,
-         SUM(CASE WHEN u.is_active = TRUE THEN 1 ELSE 0 END) as active,
-         SUM(CASE WHEN u.is_active = FALSE THEN 1 ELSE 0 END) as inactive
-       FROM users u
-       LEFT JOIN role r ON u.role_id = r.role_id
-       WHERE u.branch_id = ? 
-       AND r.role_name IN ('Pharmacist', 'Cashier')`,
-      [managerBranchId]
-    );
-
-    // Get manager count for this branch
-    const [managerCount] = await pool.execute(
-      `SELECT COUNT(*) as total
-       FROM users u
-       LEFT JOIN role r ON u.role_id = r.role_id
-       WHERE u.branch_id = ? 
-       AND r.role_name = 'Manager'`,
-      [managerBranchId]
-    );
-
+    const b = branchInfo.rows[0];
     res.json({
       success: true,
       data: {
-        branchId: branchInfo[0].branch_id,
-        branchName: branchInfo[0].branch_name,
-        location: branchInfo[0].location || null,
-        email: branchInfo[0].email || null,
-        phone: branchInfo[0].phone || null,
-        totalManagers: parseInt(managerCount[0].total) || 0,
-        totalEmployees: parseInt(employeeCount[0].total) || 0,
-        activeEmployees: parseInt(employeeCount[0].active) || 0,
-        inactiveEmployees: parseInt(employeeCount[0].inactive) || 0
+        branchId: b.branch_id, branchName: b.branch_name, location: b.location||null, email: b.email||null, phone: b.phone||null,
+        totalManagers: parseInt(managerCount.rows[0].total)||0,
+        totalEmployees: parseInt(employeeCount.rows[0].total)||0,
+        activeEmployees: parseInt(employeeCount.rows[0].active)||0,
+        inactiveEmployees: parseInt(employeeCount.rows[0].inactive)||0
       },
       message: 'Branch overview retrieved successfully'
     });
@@ -305,48 +121,40 @@ const getInventorySummary = async (req, res, next) => {
   try {
     const managerBranchId = req.users.branch_id;
 
-    const [inventoryData] = await pool.execute(
-      `SELECT 
-         COUNT(*) as total_medicines,
-         SUM(quantity_in_stock) as total_quantity,
-         COUNT(CASE WHEN quantity_in_stock < 10 THEN 1 END) as low_stock_count,
-         COUNT(CASE WHEN expiry_date < CURRENT_DATE + INTERVAL '30 days' AND expiry_date >= CURRENT_DATE THEN 1 END) as expiring_soon_count,
-         COUNT(CASE WHEN expiry_date < CURRENT_DATE THEN 1 END) as expired_count
-       FROM medicine
-       WHERE branch_id = ?`,
-      [managerBranchId]
-    );
+    const [inventoryData, lowStockMedicines, expiredMedicines] = await Promise.all([
+      pool.query(`SELECT COUNT(*) as total_medicines, COALESCE(SUM(quantity_in_stock),0) as total_quantity,
+        COUNT(CASE WHEN quantity_in_stock < 10 THEN 1 END) as low_stock_count,
+        COUNT(CASE WHEN expiry_date < CURRENT_DATE + INTERVAL '30 days' AND expiry_date >= CURRENT_DATE THEN 1 END) as expiring_soon_count,
+        COUNT(CASE WHEN expiry_date < CURRENT_DATE THEN 1 END) as expired_count
+        FROM medicine WHERE branch_id=$1`, [managerBranchId]),
+      pool.query(`SELECT medicine_id, name, quantity_in_stock FROM medicine WHERE branch_id=$1 AND quantity_in_stock < 10 ORDER BY quantity_in_stock ASC`, [managerBranchId]),
+      pool.query(`SELECT medicine_id, name, expiry_date, quantity_in_stock FROM medicine WHERE branch_id=$1 AND expiry_date < CURRENT_DATE + INTERVAL '30 days' ORDER BY expiry_date ASC`, [managerBranchId]),
+    ]);
 
-    const [lowStockMedicines] = await pool.execute(
-      `SELECT medicine_id, name, quantity_in_stock
-       FROM medicine
-       WHERE branch_id = ?
-       AND quantity_in_stock < 10
-       ORDER BY quantity_in_stock ASC`,
-      [managerBranchId]
-    );
-
-    const [expiredMedicines] = await pool.execute(
-      `SELECT medicine_id, name, expiry_date, quantity_in_stock
-       FROM medicine
-       WHERE branch_id = ?
-       AND expiry_date < CURRENT_DATE + INTERVAL '30 days'
-       ORDER BY expiry_date ASC`,
-      [managerBranchId]
-    );
-
+    const inv = inventoryData.rows[0];
     res.json({
       success: true,
       data: {
+        total_medicines: parseInt(inv.total_medicines)||0,
+        totalMedicines: parseInt(inv.total_medicines)||0,
+        in_stock: Math.max(0, parseInt(inv.total_medicines) - parseInt(inv.low_stock_count) - parseInt(inv.expired_count)),
+        inStock: Math.max(0, parseInt(inv.total_medicines) - parseInt(inv.low_stock_count) - parseInt(inv.expired_count)),
+        low_stock: parseInt(inv.low_stock_count)||0,
+        lowStock: parseInt(inv.low_stock_count)||0,
+        out_of_stock: parseInt(inv.expired_count)||0,
+        outOfStock: parseInt(inv.expired_count)||0,
+        expiring_soon: parseInt(inv.expiring_soon_count)||0,
+        expiringSoon: parseInt(inv.expiring_soon_count)||0,
+        totalQuantity: parseInt(inv.total_quantity)||0,
         summary: {
-          totalMedicines: inventoryData[0].total_medicines,
-          totalQuantity: parseInt(inventoryData[0].total_quantity) || 0,
-          lowStockCount: inventoryData[0].low_stock_count,
-          expiringSoonCount: inventoryData[0].expiring_soon_count,
-          expiredCount: inventoryData[0].expired_count
+          totalMedicines: parseInt(inv.total_medicines)||0,
+          totalQuantity: parseInt(inv.total_quantity)||0,
+          lowStockCount: parseInt(inv.low_stock_count)||0,
+          expiringSoonCount: parseInt(inv.expiring_soon_count)||0,
+          expiredCount: parseInt(inv.expired_count)||0,
         },
-        lowStockMedicines: lowStockMedicines,
-        expiredMedicines: expiredMedicines
+        lowStockMedicines: lowStockMedicines.rows,
+        expiredMedicines: expiredMedicines.rows
       },
       message: 'Inventory summary retrieved successfully'
     });
@@ -356,136 +164,41 @@ const getInventorySummary = async (req, res, next) => {
   }
 };
 
-// Get sales summary with day, month, year
+// Get sales summary with monthly breakdown
 const getSalesSummary = async (req, res, next) => {
   try {
     const managerBranchId = req.users.branch_id;
-    const { year } = req.query; // Optional: filter by specific year
+    const year = parseInt(req.query.year) || new Date().getFullYear();
 
-    const [salesToday] = await pool.execute(
-      `SELECT 
-         COUNT(*) as count,
-         COALESCE(SUM(total_amount), 0) as revenue
-       FROM sale
-       WHERE branch_id = ? 
-       AND sale_date::date = CURRENT_DATE
-       AND status = 'completed'`,
-      [managerBranchId]
-    );
+    const [salesToday, salesThisWeek, salesThisMonth, salesThisYear,
+      monthlySales, topMedicines, pendingSales, pendingReturns] = await Promise.all([
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND DATE(sale_date)=CURRENT_DATE AND status='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND EXTRACT(YEAR FROM sale_date)=EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(WEEK FROM sale_date)=EXTRACT(WEEK FROM CURRENT_DATE) AND status='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND EXTRACT(YEAR FROM sale_date)=EXTRACT(YEAR FROM CURRENT_DATE) AND EXTRACT(MONTH FROM sale_date)=EXTRACT(MONTH FROM CURRENT_DATE) AND status='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND EXTRACT(YEAR FROM sale_date)=$2 AND status='completed'`, [managerBranchId, year]),
+      pool.query(`SELECT EXTRACT(MONTH FROM sale_date) as month, COUNT(*) as count, COALESCE(SUM(total_amount),0) as revenue FROM sale WHERE branch_id=$1 AND EXTRACT(YEAR FROM sale_date)=$2 AND status='completed' GROUP BY month ORDER BY month`, [managerBranchId, year]),
+      pool.query(`SELECT m.medicine_id, m.name, SUM(si.quantity) as total_sold, SUM(si.subtotal) as total_revenue FROM sale_item si INNER JOIN sale s ON si.sale_id=s.sale_id INNER JOIN medicine m ON si.medicine_id=m.medicine_id WHERE s.branch_id=$1 AND s.status='completed' GROUP BY m.medicine_id, m.name ORDER BY total_sold DESC LIMIT 5`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count FROM sale WHERE branch_id=$1 AND status!='completed'`, [managerBranchId]),
+      pool.query(`SELECT COUNT(*) as count FROM return_table rt INNER JOIN sale s ON rt.sale_id=s.sale_id WHERE s.branch_id=$1 AND rt.status='pending'`, [managerBranchId]),
+    ]);
 
-    const [salesThisWeek] = await pool.execute(
-      `SELECT 
-         COUNT(*) as count,
-         COALESCE(SUM(total_amount), 0) as revenue
-       FROM sale
-       WHERE branch_id = ? 
-       AND EXTRACT(YEAR FROM sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-       AND EXTRACT(WEEK FROM sale_date) = EXTRACT(WEEK FROM CURRENT_DATE)
-       AND status = 'completed'`,
-      [managerBranchId]
-    );
-
-    const [salesThisMonth] = await pool.execute(
-      `SELECT 
-         COUNT(*) as count,
-         COALESCE(SUM(total_amount), 0) as revenue
-       FROM sale
-       WHERE branch_id = ? 
-       AND EXTRACT(YEAR FROM sale_date) = EXTRACT(YEAR FROM CURRENT_DATE)
-       AND EXTRACT(MONTH FROM sale_date) = EXTRACT(MONTH FROM CURRENT_DATE)
-       AND status = 'completed'`,
-      [managerBranchId]
-    );
-
-    // Get sales for current year
-    const [salesThisYear] = await pool.execute(
-      `SELECT 
-         COUNT(*) as count,
-         COALESCE(SUM(total_amount), 0) as revenue
-       FROM sale
-       WHERE branch_id = ? 
-       AND YEAR(sale_date) = YEAR(CURRENT_DATE)
-       AND status = 'completed'`,
-      [managerBranchId]
-    );
-
-    // Get sales for specific year if provided
-    let salesByYear = null;
-    if (year) {
-      const [yearSales] = await pool.execute(
-        `SELECT 
-           COUNT(*) as count,
-           COALESCE(SUM(total_amount), 0) as revenue
-         FROM sale
-         WHERE branch_id = ? 
-         AND EXTRACT(YEAR FROM sale_date) = ?
-         AND status = 'completed'`,
-        [managerBranchId, year]
-      );
-      salesByYear = {
-        year: parseInt(year),
-        count: yearSales[0].count,
-        revenue: parseFloat(yearSales[0].revenue) || 0
-      };
-    }
-
-    const [topMedicines] = await pool.execute(
-      `SELECT 
-         m.medicine_id,
-         m.name,
-         SUM(si.quantity) as total_sold,
-         SUM(si.subtotal) as total_revenue
-       FROM sale_item si
-       INNER JOIN sale s ON si.sale_id = s.sale_id
-       INNER JOIN medicine m ON si.medicine_id = m.medicine_id
-       WHERE s.branch_id = ?
-       AND s.status = 'completed'
-       GROUP BY m.medicine_id, m.name
-       ORDER BY total_sold DESC
-       LIMIT 5`,
-      [managerBranchId]
-    );
-
-    const [pendingSales] = await pool.execute(
-      `SELECT COUNT(*) as count
-       FROM sale
-       WHERE branch_id = ? 
-       AND status != 'completed'`,
-      [managerBranchId]
-    );
-
-    const [pendingReturns] = await pool.execute(
-      `SELECT COUNT(*) as count
-       FROM return_table rt
-       INNER JOIN sale s ON rt.sale_id = s.sale_id
-       WHERE s.branch_id = ? 
-       AND rt.status = 'pending'`,
-      [managerBranchId]
-    );
+    // Build 12-element monthly array
+    const monthlyArr = Array(12).fill(0);
+    monthlySales.rows.forEach(r => { monthlyArr[parseInt(r.month) - 1] = parseFloat(r.revenue) || 0; });
 
     res.json({
       success: true,
       data: {
-        today: {
-          count: salesToday[0].count,
-          revenue: parseFloat(salesToday[0].revenue) || 0
-        },
-        thisWeek: {
-          count: salesThisWeek[0].count,
-          revenue: parseFloat(salesThisWeek[0].revenue) || 0
-        },
-        thisMonth: {
-          count: salesThisMonth[0].count,
-          revenue: parseFloat(salesThisMonth[0].revenue) || 0
-        },
-        thisYear: {
-          count: salesThisYear[0].count,
-          revenue: parseFloat(salesThisYear[0].revenue) || 0
-        },
-        byYear: salesByYear,
-        pendingSales: pendingSales[0].count,
-        pendingReturns: pendingReturns[0].count,
-        topSellingMedicines: topMedicines
+        today: { count: parseInt(salesToday.rows[0].count)||0, revenue: parseFloat(salesToday.rows[0].revenue)||0 },
+        thisWeek: { count: parseInt(salesThisWeek.rows[0].count)||0, revenue: parseFloat(salesThisWeek.rows[0].revenue)||0 },
+        thisMonth: { count: parseInt(salesThisMonth.rows[0].count)||0, revenue: parseFloat(salesThisMonth.rows[0].revenue)||0 },
+        thisYear: { count: parseInt(salesThisYear.rows[0].count)||0, revenue: parseFloat(salesThisYear.rows[0].revenue)||0 },
+        byYear: { year, count: parseInt(salesThisYear.rows[0].count)||0, revenue: parseFloat(salesThisYear.rows[0].revenue)||0 },
+        monthly: monthlyArr,
+        monthlySales: monthlySales.rows.map(r => ({ month: parseInt(r.month), count: parseInt(r.count), revenue: parseFloat(r.revenue)||0 })),
+        pendingSales: parseInt(pendingSales.rows[0].count)||0,
+        pendingReturns: parseInt(pendingReturns.rows[0].count)||0,
+        topSellingMedicines: topMedicines.rows
       },
       message: 'Sales summary retrieved successfully'
     });
@@ -500,88 +213,18 @@ const getNotifications = async (req, res, next) => {
   try {
     const managerBranchId = req.users.branch_id;
 
-    // Get notifications from notification table
-    const [notifications] = await pool.execute(
-      `SELECT notification_id, title, message, type, is_read, created_at
-       FROM notification
-       WHERE branch_id = ?
-       ORDER BY created_at DESC
-       LIMIT 20`,
-      [managerBranchId]
-    );
-
-    // Get low stock alerts
-    const [lowStockAlerts] = await pool.execute(
-      `SELECT 
-         CONCAT(name, ' stock is low (', quantity_in_stock, ' remaining)') as message,
-         'warning' as type
-       FROM medicine
-       WHERE branch_id = ?
-       AND quantity_in_stock < 10
-       ORDER BY quantity_in_stock ASC
-       LIMIT 5`,
-      [managerBranchId]
-    );
-
-    // Get expired medicine alerts
-    const [expiredAlerts] = await pool.execute(
-      `SELECT 
-         CONCAT(name, ' expired on ', expiry_date) as message,
-         'error' as type
-       FROM medicine
-       WHERE branch_id = ?
-       AND expiry_date < CURRENT_DATE
-       ORDER BY expiry_date DESC
-       LIMIT 5`,
-      [managerBranchId]
-    );
-
-    // Get pending return alerts
-    const [returnAlerts] = await pool.execute(
-      `SELECT 
-         CONCAT('Pending return for sale #', rt.sale_id) as message,
-         'info' as type
-       FROM return_table rt
-       INNER JOIN sale s ON rt.sale_id = s.sale_id
-       WHERE s.branch_id = ?
-       AND rt.status = 'pending'
-       LIMIT 5`,
-      [managerBranchId]
-    );
+    const [notifications, lowStockAlerts, expiredAlerts, returnAlerts] = await Promise.all([
+      pool.query(`SELECT notification_id, title, message, type, is_read, created_at FROM notification WHERE branch_id=$1 ORDER BY created_at DESC LIMIT 20`, [managerBranchId]),
+      pool.query(`SELECT name || ' stock is low (' || quantity_in_stock || ' remaining)' as message, 'warning' as type FROM medicine WHERE branch_id=$1 AND quantity_in_stock < 10 ORDER BY quantity_in_stock ASC LIMIT 5`, [managerBranchId]),
+      pool.query(`SELECT name || ' expired on ' || expiry_date as message, 'error' as type FROM medicine WHERE branch_id=$1 AND expiry_date < CURRENT_DATE ORDER BY expiry_date DESC LIMIT 5`, [managerBranchId]),
+      pool.query(`SELECT 'Pending return for sale #' || rt.sale_id as message, 'info' as type FROM return_table rt INNER JOIN sale s ON rt.sale_id=s.sale_id WHERE s.branch_id=$1 AND rt.status='pending' LIMIT 5`, [managerBranchId]),
+    ]);
 
     const allAlerts = [
-      ...notifications.map(n => ({
-        id: n.notification_id,
-        title: n.title,
-        message: n.message,
-        type: n.type,
-        isRead: n.is_read,
-        createdAt: n.created_at
-      })),
-      ...lowStockAlerts.map(a => ({
-        id: null,
-        title: 'Low Stock Alert',
-        message: a.message,
-        type: a.type,
-        isRead: false,
-        createdAt: new Date()
-      })),
-      ...expiredAlerts.map(a => ({
-        id: null,
-        title: 'Expired Medicine Alert',
-        message: a.message,
-        type: a.type,
-        isRead: false,
-        createdAt: new Date()
-      })),
-      ...returnAlerts.map(a => ({
-        id: null,
-        title: 'Pending Return',
-        message: a.message,
-        type: a.type,
-        isRead: false,
-        createdAt: new Date()
-      }))
+      ...notifications.rows.map(n => ({ id: n.notification_id, title: n.title, message: n.message, type: n.type, is_read: n.is_read, createdAt: n.created_at })),
+      ...lowStockAlerts.rows.map(a => ({ id: null, title: 'Low Stock Alert', message: a.message, type: a.type, is_read: false, createdAt: new Date() })),
+      ...expiredAlerts.rows.map(a => ({ id: null, title: 'Expired Medicine Alert', message: a.message, type: a.type, is_read: false, createdAt: new Date() })),
+      ...returnAlerts.rows.map(a => ({ id: null, title: 'Pending Return', message: a.message, type: a.type, is_read: false, createdAt: new Date() })),
     ];
 
     res.json({
@@ -602,4 +245,3 @@ module.exports = {
   getSalesSummary,
   getNotifications
 };
-
