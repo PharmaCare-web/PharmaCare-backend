@@ -26,13 +26,26 @@ if (process.env.NODE_ENV === 'production') {
   const allowedOrigins = process.env.FRONTEND_URL 
     ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
     : [];
+
+  // Always allow localhost for development access against the deployed backend
+  const alwaysAllow = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173',
+  ];
   
   corsOptions.origin = (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
+    // Allow requests with no origin (mobile apps, Postman, server-to-server, etc.)
     if (!origin) return callback(null, true);
+
+    // Always allow localhost
+    if (alwaysAllow.includes(origin)) return callback(null, true);
     
     if (allowedOrigins.length === 0) {
-      console.warn('⚠️  No allowed origins configured. Rejecting CORS request.');
+      console.warn('⚠️  No allowed origins configured. Rejecting CORS request from:', origin);
       return callback(new Error('CORS: No allowed origins configured'));
     }
     
