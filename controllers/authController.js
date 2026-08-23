@@ -198,44 +198,29 @@ const register = async (req, res, next) => {
 
     // Check if verification columns exist (by checking if is_email_verified was selected)
     const hasVerificationColumns = newUser.hasOwnProperty('is_email_verified');
-    let emailSent = false;
-    let registrationMessage = 'User registered successfully.';
-
-    // Send verification email (only if verification columns exist and Brevo API is configured)
-    if (createdUserId && hasVerificationColumns) {
-      try {
-        // Only try to send email if Brevo API key is configured
-        if (process.env.BREVO_API_KEY) {
-          await sendVerificationEmail(email, verificationCode, full_name);
-          console.log(`✅ Verification code sent to ${email}`);
-          emailSent = true;
-          registrationMessage = 'User registered successfully. Please check your email for verification code.';
-        } else {
-          console.warn('⚠️  Brevo API not configured - skipping email verification');
-          console.warn('   Set BREVO_API_KEY in .env to enable email verification');
-          registrationMessage = 'User registered successfully. Email verification is not configured.';
-        }
-      } catch (emailError) {
-        console.error('❌ Failed to send verification email:', emailError.message);
-        registrationMessage = 'User registered successfully. Failed to send verification email.';
-        // Don't fail registration if email fails
-      }
-    }
+    const registrationMessage = 'Manager account created successfully. Your account is pending admin activation. You will be notified once your account is activated.';
 
     // Remove password and verification code from response
     const { password: _, verification_code: __, verification_code_expires: ___, ...usersWithoutPassword } = newUser;
 
-    // Custom message for managers
-    let finalMessage = 'Manager account created successfully. Your account is pending admin activation. You will be notified once your account is activated.';
-
+    // Respond IMMEDIATELY — do not block on email sending
     res.status(201).json({
       success: true,
-      message: finalMessage,
+      message: registrationMessage,
       users: usersWithoutPassword,
-      requiresVerification: hasVerificationColumns && emailSent,
+      requiresVerification: hasVerificationColumns && Boolean(process.env.BREVO_API_KEY),
       requiresActivation: true,
       isActive: false
     });
+
+    // Send verification email in background (non-blocking) — won't delay the response
+    if (createdUserId && hasVerificationColumns && process.env.BREVO_API_KEY) {
+      sendVerificationEmail(email, verificationCode, full_name)
+        .then(() => console.log(`✅ Verification code sent to ${email}`))
+        .catch(err => console.error('❌ Failed to send verification email (non-blocking):', err.message));
+    } else if (!process.env.BREVO_API_KEY) {
+      console.warn('⚠️  Brevo API not configured - skipping email verification');
+    }
   } catch (error) {
     console.error('Registration error:', error);
     console.error('Error details:', {
