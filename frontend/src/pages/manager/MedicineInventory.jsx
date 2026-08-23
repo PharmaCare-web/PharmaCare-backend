@@ -122,7 +122,7 @@ const MedicineInventory = () => {
 
     try {
       await managerAPI.updateMedicineStock(selectedMedicine.medicine_id, {
-        quantity: parseInt(stockUpdate.quantity),
+        quantity_change: parseInt(stockUpdate.quantity),
         action: stockUpdate.action,
         notes: stockUpdate.notes
       });
