@@ -19,11 +19,6 @@ const validateRegister = (req, res, next) => {
     errors.push('Password must be at least 6 characters long');
   }
 
-  // Check for at least one uppercase, one lowercase, and one number
-  if (password && !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
-    errors.push('Password must contain at least one uppercase letter, one lowercase letter, and one number');
-  }
-
   // Validate role_id
   if (!role_id || isNaN(role_id)) {
     errors.push('Valid role_id is required');
