@@ -480,11 +480,18 @@ const removeMedicineFromStock = async (req, res, next) => {
       });
     }
 
-    // Check if medicine has any sales (optional - you might want to prevent deletion if there are sales)
+    // Check if medicine has any sales - prevent deletion if there are sales
     const [sales] = await pool.execute(
       'SELECT COUNT(*) as count FROM sale_item WHERE medicine_id = ?',
       [medicine_id]
     );
+
+    if (sales[0].count > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete medicine that has been used in sales. Please delete the related sales records first.'
+      });
+    }
 
     // Delete medicine
     await pool.execute(
